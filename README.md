@@ -1,17 +1,18 @@
-# 🚀 EDG Backend Template
+# EDG Auth Service
 
-Template base riutilizzabile per microservizi backend EDG con Express.js, TypeScript e database configurabile.
+Microservizio centralizzato per l'autenticazione e gestione account nell'ecosistema EDG.
 
-## ✨ Features
+## Features
 
-- **⚡ Setup Istantaneo** - Server funzionante in 5 minuti
-- **🔒 Security Built-in** - Helmet, CORS, Rate Limiting
-- **📊 Database Flessibile** - MySQL, PostgreSQL supportati
-- **📦 Struttura Modulare** - Facilmente estendibile
-- **🧪 Development Ready** - Hot reload, error handling, logging
-- **🛠️ TypeScript** - Type safety completa
+- **Autenticazione JWT** - Access token (15 min) + Refresh token (7 giorni)
+- **Multi-Account Type** - Supporto per operatore, partner, cliente, agente
+- **Security Built-in** - Helmet, CORS, Rate Limiting, BCrypt
+- **Password Reset** - Sistema completo di recupero password con token
+- **Session Management** - Gestione sessioni multiple per dispositivo
+- **Role-Based Access** - Profile e livelli per controllo accessi granulare
+- **Architettura Modulare** - Pronto per espansioni future (2FA, OAuth, Audit)
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Setup progetto
@@ -19,65 +20,64 @@ npm install
 
 # 2. Configura environment
 cp .env.example .env
-# Modifica .env con le tue credenziali database
+# Modifica .env con le tue credenziali
 
-# 3. Avvia development server
+# 3. Crea database
+CREATE DATABASE edg_auth;
+
+# 4. Sincronizza database (prima volta)
+npm run db:sync
+
+# 5. Avvia development server
 npm run dev
 
-# 4. Verifica funzionamento
-curl http://localhost:3001
+# 6. Verifica funzionamento
+curl http://localhost:3001/health
 ```
 
-## 📊 Database Setup
+## Database Setup
 
 ### MySQL (Default)
 
 ```bash
 # .env
-DB_TYPE=mysql
-DB_NAME=edg_template_test
+DB_NAME=edg_auth
 DB_USER=root
 DB_PASSWORD=your_password
 DB_HOST=localhost
 DB_PORT=3306
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-key-change-in-production
+JWT_ACCESS_EXPIRY=15m
+JWT_REFRESH_EXPIRY=7d
+
+# Service Configuration
+SERVICE_NAME=EDG Auth Service
+PORT=3001
+NODE_ENV=development
 ```
 
-### PostgreSQL
+### Variabili Richieste
 
-```bash
-# .env
-DB_TYPE=postgres
-DB_NAME=edg_template_test
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
-```
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` - Credenziali database
+- `JWT_SECRET` - Secret key per firma JWT (cambia in production!)
 
-### Connection String (Alternative)
-
-```bash
-# .env
-DATABASE_URL=mysql://user:pass@localhost:3306/database
-DATABASE_URL=postgres://user:pass@localhost:5432/database
-```
-
-## 🛠️ Development Commands
+## Development Commands
 
 ```bash
 # Development con hot reload
 npm run dev
 
-# Sincronizza database (prima volta)
+# Sincronizza database (crea/aggiorna tabelle)
 npm run db:sync
-# Oppure: DB_SYNC=true npm run dev
 
 # Build per production
 npm run build
 npm start
 
 # Testing e linting
-npm run test
+npm test
 npm run lint
 npm run lint:fix
 
@@ -85,99 +85,244 @@ npm run lint:fix
 npm run clean
 ```
 
-## 🌐 Endpoints Disponibili
+## API Endpoints
 
-| Endpoint             | Metodo | Descrizione                     |
-| -------------------- | ------ | ------------------------------- |
-| `/`                  | GET    | Service info e moduli attivi    |
-| `/health`            | GET    | Health check con stato database |
-| `/template/health`   | GET    | Template module health          |
-| `/template/info`     | GET    | Informazioni template           |
-| `/template/examples` | GET    | Lista esempi                    |
-| `/template/examples` | POST   | Crea nuovo esempio              |
+### Public Endpoints
 
-## 📁 Struttura Progetto
+| Endpoint                            | Metodo | Descrizione             |
+| ----------------------------------- | ------ | ----------------------- |
+| `GET /`                             | GET    | Service info            |
+| `GET /health`                       | GET    | Health check            |
+| `POST /auth/register`               | POST   | Registra nuovo account  |
+| `POST /auth/login`                  | POST   | Login e genera tokens   |
+| `POST /auth/refresh`                | POST   | Rinnova access token    |
+| `POST /auth/request-reset-password` | POST   | Richiedi reset password |
+| `POST /auth/reset-password`         | POST   | Conferma reset password |
+
+### Protected Endpoints (Require Authentication)
+
+| Endpoint                     | Metodo | Descrizione                    |
+| ---------------------------- | ------ | ------------------------------ |
+| `POST /auth/logout`          | POST   | Logout dalla sessione corrente |
+| `POST /auth/logout-all`      | POST   | Logout da tutti i dispositivi  |
+| `POST /auth/change-password` | POST   | Cambia password                |
+| `GET /auth/me`               | GET    | Recupera dati account corrente |
+
+## Esempi di Utilizzo
+
+### 1. Registrazione
+
+```bash
+curl -X POST http://localhost:3001/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "mario.rossi@example.com",
+    "password": "Password123",
+    "accountType": "cliente",
+    "entityId": "123e4567-e89b-12d3-a456-426614174000"
+  }'
+```
+
+### 2. Login
+
+```bash
+curl -X POST http://localhost:3001/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "mario.rossi@example.com",
+    "password": "Password123",
+    "accountType": "cliente"
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "a1b2c3d4e5f6...",
+    "account": {
+      "id": "uuid",
+      "email": "mario.rossi@example.com",
+      "accountType": "cliente"
+    }
+  }
+}
+```
+
+### 3. Richieste Autenticate
+
+```bash
+# Usa l'accessToken ricevuto dal login
+curl http://localhost:3001/auth/me \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### 4. Refresh Token
+
+```bash
+curl -X POST http://localhost:3001/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "a1b2c3d4e5f6..."
+  }'
+```
+
+### 5. Reset Password
+
+```bash
+# Step 1: Richiedi reset
+curl -X POST http://localhost:3001/auth/request-reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "mario.rossi@example.com",
+    "accountType": "cliente"
+  }'
+
+# Step 2: Conferma con token (ricevuto via email)
+curl -X POST http://localhost:3001/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "reset-token-from-email",
+    "newPassword": "NewPassword123"
+  }'
+```
+
+## Struttura Progetto
 
 ```
-edg-backend-template/
+auth-service/
 ├── src/
-│   ├── core/                    # Framework riutilizzabile
+│   ├── core/                       # Framework riutilizzabile
 │   │   ├── config/
-│   │   │   ├── environment.ts   # Gestione configurazioni
-│   │   │   └── database.ts      # Setup database
-│   │   └── server.ts            # Server Express modulare
+│   │   │   ├── environment.ts      # Configurazione servizio
+│   │   │   └── database.ts         # Database manager
+│   │   └── server.ts               # Server Express modulare
 │   │
-│   ├── modules/                 # Moduli business logic
-│   │   └── (aggiungi qui i tuoi moduli)
+│   ├── modules/
+│   │   └── auth/                   # Modulo autenticazione
+│   │       ├── models/             # Modelli Sequelize
+│   │       │   ├── Account.ts
+│   │       │   ├── Session.ts
+│   │       │   ├── ResetToken.ts
+│   │       │   └── associations.ts
+│   │       ├── services/           # Business logic
+│   │       │   ├── AuthService.ts
+│   │       │   └── TokenService.ts
+│   │       ├── controllers/        # HTTP Controllers
+│   │       │   └── AuthController.ts
+│   │       ├── middleware/         # Middleware autenticazione
+│   │       │   └── authMiddleware.ts
+│   │       ├── routes/             # Route definitions
+│   │       │   └── auth.routes.ts
+│   │       ├── types/              # TypeScript types
+│   │       │   └── auth.types.ts
+│   │       └── utils/              # Utility functions
+│   │           ├── password.ts
+│   │           ├── token.ts
+│   │           └── validation.ts
 │   │
-│   └── app.ts                   # Entry point
+│   └── app.ts                      # Entry point
 │
-├── scripts/                     # Utility scripts
 ├── package.json
 ├── tsconfig.json
-└── .env.example
+└── .env
 ```
 
-## 🔧 Creazione Nuovi Servizi
+## Account Types
 
-Una volta che il template funziona, puoi usarlo per creare nuovi servizi:
+Il sistema supporta quattro tipi di account:
 
-```bash
-# Genera nuovo servizio (TODO: implementare script)
-npm run create-service orders-service
+| Account Type | Descrizione           | Profile Available             |
+| ------------ | --------------------- | ----------------------------- |
+| `operatore`  | Operatori interni EDG | root, admin, operatore, guest |
+| `partner`    | Partner commerciali   | No                            |
+| `cliente`    | Clienti finali        | No                            |
+| `agente`     | Agenti esterni        | No                            |
 
-# Questo creerà:
-# ../orders-service/ con la stessa struttura
+### Profile Operatore
+
+Solo per account tipo `operatore`:
+
+- **root** - Accesso completo (livello 10)
+- **admin** - Amministratore (livello 8-9)
+- **operatore** - Operatore standard (livello 5-7)
+- **guest** - Accesso limitato (livello 1-4)
+
+### Livelli Operatore
+
+Livello numerico da 1 a 10 per controllo accessi granulare.
+
+## Security Features
+
+- **Helmet.js** - HTTP security headers
+- **CORS** - Cross-Origin configurabile
+- **Rate Limiting** - 100 richieste/15 minuti per IP
+- **BCrypt** - Password hashing (12 rounds)
+- **JWT** - Token firmati con HS256
+- **Input Validation** - Validazione automatica input
+- **Session Revocation** - Revoca sessioni su logout
+- **Password Policy** - Minimo 8 caratteri, maiuscole, minuscole, numeri
+
+## Middleware di Autenticazione
+
+```typescript
+import { authenticate, requireAccountType, requireProfile, requireMinLevel } from './middleware/authMiddleware';
+
+// Richiede solo autenticazione
+router.get('/protected', authenticate, handler);
+
+// Richiede tipo account specifico
+router.get('/operators-only', authenticate, requireAccountType('operatore'), handler);
+
+// Richiede profile specifico
+router.get('/admin-only', authenticate, requireProfile('admin', 'root'), handler);
+
+// Richiede livello minimo
+router.get('/level-5-up', authenticate, requireMinLevel(5), handler);
 ```
 
-## 🧪 Testing
+## Database Schema
 
-```bash
-# Test del template
-curl http://localhost:3001
-curl http://localhost:3001/health
-curl http://localhost:3001/template/info
+### Tabella `accounts`
 
-# Test creazione esempio
-curl -X POST http://localhost:3001/template/examples \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test Example","description":"Primo test"}'
-```
+- `id` (UUID) - Primary key
+- `email` (VARCHAR) - Email univoca per accountType
+- `password` (VARCHAR) - Hash BCrypt
+- `accountType` (ENUM) - operatore | partner | cliente | agente
+- `entityId` (UUID) - ID entità specifica (operatore_id, partner_id, etc.)
+- `isActive` (BOOLEAN) - Account attivo
+- `isVerified` (BOOLEAN) - Email verificata
+- `profile` (ENUM) - root | admin | operatore | guest (solo operatori)
+- `level` (INTEGER) - 1-10 (solo operatori)
+- `lastLogin` (DATETIME) - Ultimo login
+- Timestamps: `createdAt`, `updatedAt`
 
-## 🔒 Security Features
+### Tabella `sessions`
 
-- **Helmet.js** - Security headers
-- **CORS** - Cross-Origin Resource Sharing configurabile
-- **Rate Limiting** - Protezione contro spam/DoS
-- **Input Validation** - Validazione automatica
-- **Error Handling** - Gestione errori sicura
+- `id` (UUID) - Primary key
+- `accountId` (UUID) - Foreign key → accounts
+- `refreshToken` (VARCHAR) - Token univoco
+- `expiresAt` (DATETIME) - Scadenza sessione
+- `ipAddress` (VARCHAR) - IP client
+- `userAgent` (TEXT) - User agent
+- `isRevoked` (BOOLEAN) - Sessione revocata
+- Timestamp: `createdAt`
 
-## 🎯 Database Support
+### Tabella `reset_tokens`
 
-| Database   | Status   | Dipendenze    |
-| ---------- | -------- | ------------- |
-| MySQL      | ✅ Ready | mysql2        |
-| PostgreSQL | ✅ Ready | pg, pg-hstore |
-| MongoDB    | 🚧 TODO  | mongoose      |
-| Redis      | 🚧 TODO  | redis         |
+- `id` (UUID) - Primary key
+- `accountId` (UUID) - Foreign key → accounts
+- `token` (VARCHAR) - Token univoco
+- `expiresAt` (DATETIME) - Scadenza (1 ora)
+- `used` (BOOLEAN) - Token utilizzato
+- `ipAddress` (VARCHAR) - IP richiedente
+- `userAgent` (TEXT) - User agent
+- Timestamp: `createdAt`
 
-## 📝 Environment Variables
-
-Vedi `.env.example` per la lista completa delle variabili disponibili.
-
-Variabili **richieste**:
-
-- `DB_NAME` - Nome database
-- `DB_USER` - Username database
-- `DB_PASSWORD` - Password database
-
-Variabili **opzionali**:
-
-- `DB_TYPE` - Tipo database (default: mysql)
-- `PORT` - Porta server (default: 3001)
-- `DB_SYNC` - Sync tabelle al startup (default: false)
-
-## 🚀 Production Deployment
+## Production Deployment
 
 ```bash
 # Build
@@ -185,21 +330,41 @@ npm run build
 
 # Environment production
 NODE_ENV=production
-DB_SYNC=false  # IMPORTANTE!
+DB_SYNC=false  # IMPORTANTE: mai true in production!
+JWT_SECRET=change-this-in-production-with-strong-secret
 
 # Start
 npm start
 ```
 
-## 📞 Support
+### Raccomandazioni Production
+
+1. **JWT_SECRET** - Usa secret forte e unico (min 32 caratteri random)
+2. **DB_SYNC** - Sempre `false`, gestisci migrazioni manualmente
+3. **HTTPS** - Usa sempre HTTPS in production
+4. **Rate Limiting** - Configura limiti appropriati per il tuo traffico
+5. **Monitoring** - Implementa logging e monitoring (es. EdgLogger)
+6. **Backup** - Backup automatici database regolari
+
+## Espansioni Future
+
+Il servizio è progettato per supportare facilmente:
+
+- **2FA Module** - Two-Factor Authentication (TOTP, SMS)
+- **OAuth Module** - Social login (Google, Microsoft, GitHub)
+- **Audit Module** - Security logging e analytics
+- **Admin Module** - Gestione utenti e sessioni da UI
+- **Notifications Module** - Alert sicurezza via email/SMS
+
+## Support
 
 Per domande o problemi:
 
-1. Verifica la configurazione in `.env`
-2. Controlla i log del server
-3. Testa la connessione database
-4. Consulta la documentazione EDG
+1. Verifica configurazione `.env`
+2. Controlla log del server
+3. Testa connessione database: `npm run db:sync`
+4. Verifica health check: `curl http://localhost:3001/health`
 
 ---
 
-**🎉 Template pronto! Sviluppa il tuo microservizio aggiungendo moduli in `src/modules/`**
+**EDG Auth Service - Autenticazione sicura e scalabile per l'ecosistema EDG**

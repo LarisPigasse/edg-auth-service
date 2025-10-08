@@ -6,13 +6,20 @@ export const createAccountModel = (sequelize: Sequelize) => {
     'Account',
     {
       id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+        comment: 'ID interno auto-incrementale',
+      },
+      uuid: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
-        primaryKey: true,
-        comment: "UUID univoco per l'account",
+        allowNull: false,
+        unique: true,
+        comment: 'UUID pubblico per identificazione esterna',
       },
       email: {
-        type: DataTypes.STRING(255),
+        type: DataTypes.STRING(256),
         allowNull: false,
         validate: {
           isEmail: true,
@@ -20,7 +27,7 @@ export const createAccountModel = (sequelize: Sequelize) => {
         comment: "Email dell'utente (username)",
       },
       password: {
-        type: DataTypes.STRING(255),
+        type: DataTypes.STRING(256),
         allowNull: true,
         comment: 'Hash BCrypt della password',
       },
@@ -36,6 +43,18 @@ export const createAccountModel = (sequelize: Sequelize) => {
         field: 'entityId',
         comment: "UUID dell'entità specifica (operatore_id, partner_id, etc.)",
       },
+      roleId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: 'roleId',
+        references: {
+          model: 'roles',
+          key: 'id',
+        },
+        onDelete: 'RESTRICT',
+        onUpdate: 'CASCADE',
+        comment: "Ruolo assegnato all'account (definisce i permessi)",
+      },
       isActive: {
         type: DataTypes.BOOLEAN,
         allowNull: false,
@@ -50,21 +69,6 @@ export const createAccountModel = (sequelize: Sequelize) => {
         field: 'isVerified',
         comment: 'Email verificata',
       },
-      profile: {
-        type: DataTypes.ENUM('root', 'admin', 'operatore', 'guest'),
-        allowNull: true,
-        comment: 'Profilo operatore (solo per account tipo operatore)',
-      },
-      level: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        defaultValue: 1,
-        validate: {
-          min: 1,
-          max: 10,
-        },
-        comment: 'Livello operatore 1-10 (solo per account tipo operatore)',
-      },
       lastLogin: {
         type: DataTypes.DATE,
         allowNull: true,
@@ -74,7 +78,13 @@ export const createAccountModel = (sequelize: Sequelize) => {
     },
     {
       tableName: 'accounts',
+      timestamps: true,
       indexes: [
+        {
+          unique: true,
+          fields: ['uuid'],
+          name: 'unique_account_uuid',
+        },
         {
           unique: true,
           fields: ['email', 'accountType'],
@@ -83,6 +93,7 @@ export const createAccountModel = (sequelize: Sequelize) => {
         { fields: ['accountType'], name: 'idx_account_type' },
         { fields: ['entityId'], name: 'idx_entity_id' },
         { fields: ['accountType', 'entityId'], name: 'idx_account_type_entity' },
+        { fields: ['roleId'], name: 'idx_role_id' },
         { fields: ['isActive'], name: 'idx_is_active' },
         { fields: ['email'], name: 'idx_email' },
         { fields: ['isActive', 'accountType'], name: 'idx_active_type' },

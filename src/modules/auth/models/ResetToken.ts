@@ -6,19 +6,19 @@ export const createResetTokenModel = (sequelize: Sequelize) => {
     'ResetToken',
     {
       id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
         primaryKey: true,
-        comment: 'UUID univoco per il reset token',
+        comment: 'ID interno auto-incrementale',
       },
       token: {
         type: DataTypes.STRING(100),
         allowNull: false,
         unique: true,
-        comment: 'Token per il reset della password',
+        comment: 'Token per il reset della password (ID pubblico)',
       },
       accountId: {
-        type: DataTypes.UUID,
+        type: DataTypes.INTEGER,
         allowNull: false,
         field: 'accountId',
         references: {

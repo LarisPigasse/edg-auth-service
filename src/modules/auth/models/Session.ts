@@ -6,13 +6,13 @@ export const createSessionModel = (sequelize: Sequelize) => {
     'Session',
     {
       id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
         primaryKey: true,
-        comment: 'UUID univoco per la sessione',
+        comment: 'ID interno auto-incrementale',
       },
       accountId: {
-        type: DataTypes.UUID,
+        type: DataTypes.INTEGER,
         allowNull: false,
         field: 'accountId',
         references: {
@@ -28,7 +28,7 @@ export const createSessionModel = (sequelize: Sequelize) => {
         allowNull: false,
         unique: true,
         field: 'refreshToken',
-        comment: "Token per refresh dell'access token",
+        comment: "Token per refresh dell'access token (ID pubblico della sessione)",
       },
       expiresAt: {
         type: DataTypes.DATE,
