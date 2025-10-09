@@ -1,12 +1,14 @@
 // src/modules/auth/middleware/authMiddleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { TokenService } from '../services/TokenService';
-import { AccountType, ProfileType } from '../types/auth.types';
+import { AccountType } from '../types/auth.types';
+// ❌ RIMOSSO: ProfileType (non esiste più)
 
 const tokenService = new TokenService();
 
 /**
  * Middleware per verificare il token JWT
+ * Carica automaticamente permissions dal JWT payload
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -31,9 +33,11 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       return;
     }
 
-    // Aggiungi dati account alla request
+    // ✅ Aggiungi dati account alla request
+    // Il payload contiene già: accountId, email, accountType, roleId, permissions[]
     (req as any).accountId = payload.accountId;
     (req as any).account = payload;
+    // Nota: payload.permissions è automaticamente disponibile in req.account.permissions
 
     next();
   } catch (error) {
@@ -46,6 +50,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 /**
  * Middleware per verificare il tipo di account
+ * Uso: requireAccountType('operatore', 'admin')
  */
 export const requireAccountType = (...allowedTypes: AccountType[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -72,64 +77,15 @@ export const requireAccountType = (...allowedTypes: AccountType[]) => {
   };
 };
 
-/**
- * Middleware per verificare il profilo operatore
- */
-export const requireProfile = (...allowedProfiles: ProfileType[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const account = (req as any).account;
+// ❌ RIMOSSO: requireProfile (usa ProfileType che non esiste più)
+// Usa invece requirePermission da permissionMiddleware.ts
 
-    if (!account) {
-      res.status(401).json({
-        success: false,
-        error: 'Autenticazione richiesta',
-      });
-      return;
-    }
-
-    if (!account.profile || !allowedProfiles.includes(account.profile)) {
-      res.status(403).json({
-        success: false,
-        error: 'Accesso non autorizzato per questo profilo',
-        required: allowedProfiles,
-      });
-      return;
-    }
-
-    next();
-  };
-};
-
-/**
- * Middleware per verificare il livello minimo operatore
- */
-export const requireMinLevel = (minLevel: number) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const account = (req as any).account;
-
-    if (!account) {
-      res.status(401).json({
-        success: false,
-        error: 'Autenticazione richiesta',
-      });
-      return;
-    }
-
-    if (!account.level || account.level < minLevel) {
-      res.status(403).json({
-        success: false,
-        error: `Livello minimo richiesto: ${minLevel}`,
-        currentLevel: account.level,
-      });
-      return;
-    }
-
-    next();
-  };
-};
+// ❌ RIMOSSO: requireMinLevel (usa level che non esiste più)
+// Usa invece requirePermission da permissionMiddleware.ts
 
 /**
  * Middleware opzionale - non fallisce se token mancante
+ * Utile per endpoint pubblici che possono beneficiare di autenticazione
  */
 export const optionalAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -141,6 +97,7 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
       if (payload) {
         (req as any).accountId = payload.accountId;
         (req as any).account = payload;
+        // payload.permissions automaticamente disponibile
       }
     }
 

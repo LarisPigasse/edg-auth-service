@@ -1,26 +1,38 @@
 // src/modules/auth/types/auth.types.ts
 
+// ============================================================================
+// ACCOUNT TYPES
+// ============================================================================
+
 export type AccountType = 'operatore' | 'partner' | 'cliente' | 'agente';
-export type ProfileType = 'root' | 'admin' | 'operatore' | 'guest';
+
+// ❌ RIMOSSO: ProfileType (non più usato)
+// export type ProfileType = 'root' | 'admin' | 'operatore' | 'guest';
 
 export interface AccountAttributes {
-  id: string;
+  id: number; // ✅ AGGIORNATO: number invece di string (pattern dual-key)
+  uuid: string; // ✅ NUOVO: UUID pubblico
   email: string;
   password?: string;
   accountType: AccountType;
   entityId: string;
+  roleId: number; // ✅ NUOVO: FK verso roles
   isActive: boolean;
   isVerified: boolean;
-  profile?: ProfileType;
-  level?: number;
+  // ❌ RIMOSSO: profile?: ProfileType;
+  // ❌ RIMOSSO: level?: number;
   lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
 
+// ============================================================================
+// SESSION & RESET TOKEN TYPES
+// ============================================================================
+
 export interface SessionAttributes {
-  id: string;
-  accountId: string;
+  id: number; // ✅ AGGIORNATO: number invece di string
+  accountId: number; // ✅ AGGIORNATO: number
   refreshToken: string;
   expiresAt: Date;
   ipAddress?: string;
@@ -30,9 +42,9 @@ export interface SessionAttributes {
 }
 
 export interface ResetTokenAttributes {
-  id: string;
+  id: number; // ✅ AGGIORNATO: number invece di string
   token: string;
-  accountId: string;
+  accountId: number; // ✅ AGGIORNATO: number
   expiresAt: Date;
   used: boolean;
   ipAddress?: string;
@@ -40,14 +52,48 @@ export interface ResetTokenAttributes {
   createdAt: Date;
 }
 
-// DTOs per le richieste
+// ============================================================================
+// RBAC TYPES (NUOVO)
+// ============================================================================
+
+export interface RoleAttributes {
+  id: number;
+  uuid: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface RolePermissionAttributes {
+  id: number;
+  roleId: number;
+  permission: string;
+  createdAt: Date;
+}
+
+// Moduli disponibili nel sistema
+export type Module = 'spedizioni' | 'gestione' | 'report' | 'sistema' | '*'; // wildcard globale
+
+// Azioni disponibili
+export type Action = 'read' | 'create' | 'update' | 'delete' | 'approve' | 'export' | '*'; // wildcard azioni
+
+// Un permesso è una stringa nel formato 'modulo.azione' o wildcard
+export type Permission = string; // es: 'spedizioni.read', 'gestione.*', '*'
+
+// ============================================================================
+// REQUEST/RESPONSE DTOs
+// ============================================================================
+
 export interface RegisterRequest {
   email: string;
   password: string;
   accountType: AccountType;
   entityId: string;
-  profile?: ProfileType;
-  level?: number;
+  roleId: number; // ✅ NUOVO: ruolo da assegnare
+  // ❌ RIMOSSO: profile?: ProfileType;
+  // ❌ RIMOSSO: level?: number;
 }
 
 export interface LoginRequest {
@@ -60,11 +106,14 @@ export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
   account: {
-    id: string;
+    id: number; // ✅ AGGIORNATO: number
     email: string;
     accountType: AccountType;
-    profile?: ProfileType;
-    level?: number;
+    roleId: number; // ✅ NUOVO
+    // ❌ RIMOSSO: profile?: ProfileType;
+    // ❌ RIMOSSO: level?: number;
+    // Opzionale: includere permissions per debug/UI
+    // permissions?: string[];
   };
 }
 
@@ -82,16 +131,31 @@ export interface ConfirmResetPasswordRequest {
   newPassword: string;
 }
 
+// ============================================================================
+// JWT TOKEN PAYLOAD
+// ============================================================================
+
 export interface AuthTokenPayload {
-  accountId: string;
+  accountId: number; // ✅ AGGIORNATO: number
   email: string;
   accountType: AccountType;
-  profile?: ProfileType;
-  level?: number;
-  sessionId?: string;
+  roleId: number; // ✅ NUOVO
+  permissions: string[]; // ✅ NUOVO: array di permessi ['spedizioni.*', 'report.read', ...]
+  sessionId?: number; // ✅ AGGIORNATO: number
+  // ❌ RIMOSSO: profile?: ProfileType;
+  // ❌ RIMOSSO: level?: number;
+
+  // JWT standard fields (aggiunti automaticamente da jsonwebtoken)
+  iat?: number; // issued at
+  exp?: number; // expiration
+  iss?: string; // issuer
 }
+
+// ============================================================================
+// EXTENDED REQUEST TYPE
+// ============================================================================
 
 export interface RequestWithAccount extends Request {
   account?: AccountAttributes;
-  accountId?: string;
+  accountId?: number; // ✅ AGGIORNATO: number
 }

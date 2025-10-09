@@ -1,0 +1,7 @@
+### Richiesta Dati Utente (Me)
+
+# Metodo e URL:
+GET http://localhost:3001/auth/me HTTP/1.1
+
+# Header di Autorizzazione:
+Authorization: Bearer YOUR_ACCESS_TOKEN

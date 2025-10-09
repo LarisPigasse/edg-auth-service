@@ -14,7 +14,13 @@ import { TokenService } from './TokenService';
 export class AuthService {
   private tokenService: TokenService;
 
-  constructor(private accountModel: any, private sessionModel: any, private resetTokenModel: any) {
+  constructor(
+    private accountModel: any,
+    private sessionModel: any,
+    private resetTokenModel: any,
+    private roleModel: any,
+    private rolePermissionModel: any // ✅ AGGIUNTO: model RolePermission
+  ) {
     this.tokenService = new TokenService();
   }
 
@@ -40,12 +46,15 @@ export class AuthService {
       throw new Error(passwordValidation.errors.join(', '));
     }
 
-    if (data.profile && !ValidationUtils.isValidProfile(data.profile)) {
-      throw new Error('Profile non valido');
+    // Validazione roleId
+    if (!ValidationUtils.isValidRoleId(data.roleId)) {
+      throw new Error('RoleId non valido');
     }
 
-    if (data.level && !ValidationUtils.isValidLevel(data.level)) {
-      throw new Error('Level deve essere tra 1 e 10');
+    // Verifica che il ruolo esista
+    const roleExists = await this.roleModel.findByPk(data.roleId);
+    if (!roleExists) {
+      throw new Error('Ruolo non trovato');
     }
 
     // Verifica email univoca per accountType
@@ -69,8 +78,7 @@ export class AuthService {
       password: passwordHash,
       accountType: data.accountType,
       entityId: data.entityId,
-      profile: data.profile,
-      level: data.level,
+      roleId: data.roleId,
       isActive: true,
       isVerified: false,
     });
@@ -86,12 +94,24 @@ export class AuthService {
    * Login account
    */
   async login(data: LoginRequest, ipAddress?: string, userAgent?: string): Promise<LoginResponse> {
-    // Trova account
+    // ✅ FIXED: Usa rolePermissionModel direttamente
     const account = await this.accountModel.findOne({
       where: {
         email: data.email,
         accountType: data.accountType,
       },
+      include: [
+        {
+          model: this.roleModel,
+          as: 'role',
+          include: [
+            {
+              model: this.rolePermissionModel, // ✅ FIXED
+              as: 'permissions',
+            },
+          ],
+        },
+      ],
     });
 
     if (!account) {
@@ -110,13 +130,16 @@ export class AuthService {
       throw new Error('Credenziali non valide');
     }
 
-    // Genera tokens
+    // Estrai permessi dal ruolo
+    const permissions = await this.loadAccountPermissions(account.id);
+
+    // Genera token con permissions
     const accessToken = this.tokenService.generateAccessToken({
       accountId: account.id,
       email: account.email,
       accountType: account.accountType,
-      profile: account.profile,
-      level: account.level,
+      roleId: account.roleId,
+      permissions,
     });
 
     const refreshToken = this.tokenService.generateRefreshToken();
@@ -141,8 +164,7 @@ export class AuthService {
         id: account.id,
         email: account.email,
         accountType: account.accountType,
-        profile: account.profile,
-        level: account.level,
+        roleId: account.roleId,
       },
     };
   }
@@ -151,10 +173,27 @@ export class AuthService {
    * Refresh access token
    */
   async refreshToken(refreshToken: string, ipAddress?: string, userAgent?: string): Promise<LoginResponse> {
-    // Trova sessione
+    // ✅ FIXED: Usa rolePermissionModel direttamente
     const session = await this.sessionModel.findOne({
       where: { refreshToken },
-      include: ['account'],
+      include: [
+        {
+          model: this.accountModel,
+          as: 'account',
+          include: [
+            {
+              model: this.roleModel,
+              as: 'role',
+              include: [
+                {
+                  model: this.rolePermissionModel, // ✅ FIXED
+                  as: 'permissions',
+                },
+              ],
+            },
+          ],
+        },
+      ],
     });
 
     if (!session) {
@@ -176,13 +215,16 @@ export class AuthService {
       throw new Error('Account disattivato');
     }
 
-    // Genera nuovo access token
+    // Carica permessi
+    const permissions = await this.loadAccountPermissions(account.id);
+
+    // Genera nuovo access token con permissions
     const accessToken = this.tokenService.generateAccessToken({
       accountId: account.id,
       email: account.email,
       accountType: account.accountType,
-      profile: account.profile,
-      level: account.level,
+      roleId: account.roleId,
+      permissions,
       sessionId: session.id,
     });
 
@@ -199,8 +241,7 @@ export class AuthService {
         id: account.id,
         email: account.email,
         accountType: account.accountType,
-        profile: account.profile,
-        level: account.level,
+        roleId: account.roleId,
       },
     };
   }
@@ -221,7 +262,7 @@ export class AuthService {
   /**
    * Logout da tutti i dispositivi
    */
-  async logoutAll(accountId: string): Promise<void> {
+  async logoutAll(accountId: number): Promise<void> {
     await this.sessionModel.update({ isRevoked: true }, { where: { accountId, isRevoked: false } });
   }
 
@@ -300,14 +341,14 @@ export class AuthService {
   /**
    * Verifica account (email verification)
    */
-  async verifyAccount(accountId: string): Promise<void> {
+  async verifyAccount(accountId: number): Promise<void> {
     await this.accountModel.update({ isVerified: true }, { where: { id: accountId } });
   }
 
   /**
    * Cambia password (utente autenticato)
    */
-  async changePassword(accountId: string, oldPassword: string, newPassword: string): Promise<void> {
+  async changePassword(accountId: number, oldPassword: string, newPassword: string): Promise<void> {
     const account = await this.accountModel.findByPk(accountId);
 
     if (!account) {
@@ -353,5 +394,38 @@ export class AuthService {
         expiresAt: { [Op.lt]: now },
       },
     });
+  }
+
+  // ============================================================================
+  // HELPER METHODS PER RBAC
+  // ============================================================================
+
+  /**
+   * Carica i permessi di un account dal suo ruolo
+   * ✅ FIXED: Usa rolePermissionModel direttamente
+   */
+  private async loadAccountPermissions(accountId: number): Promise<string[]> {
+    const account = await this.accountModel.findByPk(accountId, {
+      include: [
+        {
+          model: this.roleModel,
+          as: 'role',
+          include: [
+            {
+              model: this.rolePermissionModel, // ✅ FIXED
+              as: 'permissions',
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!account || !account.role) {
+      return [];
+    }
+
+    // Estrai array di permessi
+    const permissions = account.role.permissions || [];
+    return permissions.map((p: any) => p.permission);
   }
 }

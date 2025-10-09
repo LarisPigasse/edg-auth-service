@@ -2,7 +2,8 @@
 
 **Data ultimo aggiornamento:** Ottobre 2025  
 **Versione:** 1.0 - In sviluppo  
-**Fase:** Implementazione Sistema RBAC
+**Fase:** Implementazione Sistema RBAC  
+**Ultimo checkpoint:** Database sincronizzato, modelli registrati, servizio funzionante
 
 ---
 
@@ -94,7 +95,7 @@ auth-service/
 │   │           ├── token.ts
 │   │           └── validation.ts     # ⚠️ DA AGGIORNARE
 │   │
-│   └── app.ts                        # ⚠️ DA AGGIORNARE (registrazione modelli)
+│   └── app.ts                        # ✅ AGGIORNATO (registrazione modelli)
 │
 ├── package.json
 ├── tsconfig.json
@@ -391,42 +392,17 @@ roles (1) ──────< (N) role_permissions
 - [x] `password.ts` - Hashing BCrypt, validazione policy
 - [x] `token.ts` - Generazione token casuali, calcolo scadenze
 
+#### 5. Registrazione Modelli e Database (100%) ✅ NUOVO!
+
+- [x] `app.ts` - Aggiornato con registrazione Role e RolePermission
+- [x] Ordine modelli corretto (rispetta dipendenze FK)
+- [x] Database sincronizzato con successo
+- [x] Health check testato e funzionante
+- [x] 5 tabelle create: roles, role_permissions, accounts, sessions, reset_tokens
+
 ### ⚠️ DA COMPLETARE
 
-#### 1. Registrazione Modelli in app.ts (PRIORITÀ ALTA)
-
-**File:** `src/app.ts`
-
-**Modifiche necessarie:**
-
-```typescript
-// Import nuovi modelli
-import {
-  createAccountModel,
-  createSessionModel,
-  createResetTokenModel,
-  createRoleModel, // ← NUOVO
-  createRolePermissionModel, // ← NUOVO
-  setupAuthAssociations,
-} from './modules/auth/models';
-
-// AuthModuleConfig aggiornato
-const AuthModuleConfig: ServerModule = {
-  name: 'auth',
-  path: '/auth',
-  router: placeholderRouter,
-  models: [
-    createAccountModel,
-    createSessionModel,
-    createResetTokenModel,
-    createRoleModel, // ← NUOVO
-    createRolePermissionModel, // ← NUOVO
-  ],
-  associations: setupAuthAssociations,
-};
-```
-
-#### 2. Types TypeScript (PRIORITÀ ALTA)
+#### 1. Types TypeScript (PRIORITÀ ALTA)
 
 **File:** `src/modules/auth/types/auth.types.ts`
 
@@ -464,6 +440,25 @@ const AuthModuleConfig: ServerModule = {
   export type Action = 'read' | 'create' | 'update' | 'delete' | 'approve' | 'export' | '*';
   export type Permission = Module | Action;
   ```
+
+#### 2. Script Seed Ruoli (PRIORITÀ ALTA)
+
+**Nuovo file:** `src/modules/auth/seed/roles.seed.ts`
+
+**Contenuto:**
+
+- [ ] Funzione per creare ruoli predefiniti:
+  - root
+  - admin
+  - operatore_vendite_full
+  - operatore_vendite_standard
+  - operatore_vendite_junior
+  - operatore_magazzino
+  - contabile
+  - operatore_readonly
+  - guest
+- [ ] Funzione per assegnare permessi ai ruoli
+- [ ] Script eseguibile: `npm run seed:roles`
 
 #### 3. Validation Utils (PRIORITÀ MEDIA)
 
@@ -555,26 +550,7 @@ const AuthModuleConfig: ServerModule = {
   );
   ```
 
-#### 9. Script Seed Ruoli (PRIORITÀ ALTA)
-
-**Nuovo file:** `src/modules/auth/seed/roles.seed.ts`
-
-**Contenuto:**
-
-- [ ] Funzione per creare ruoli predefiniti:
-  - root
-  - admin
-  - operatore_vendite_full
-  - operatore_vendite_standard
-  - operatore_vendite_junior
-  - operatore_magazzino
-  - contabile
-  - operatore_readonly
-  - guest
-- [ ] Funzione per assegnare permessi ai ruoli
-- [ ] Script eseguibile: `npm run seed:roles`
-
-#### 10. Service per Gestione Ruoli (PRIORITÀ MEDIA)
+#### 9. Service per Gestione Ruoli (PRIORITÀ MEDIA)
 
 **Nuovo file:** `src/modules/auth/services/RoleService.ts`
 
@@ -594,7 +570,7 @@ class RoleService {
 }
 ```
 
-#### 11. PermissionService (PRIORITÀ ALTA)
+#### 10. PermissionService (PRIORITÀ ALTA)
 
 **Nuovo file:** `src/modules/auth/services/PermissionService.ts`
 
@@ -609,7 +585,7 @@ class PermissionService {
 }
 ```
 
-#### 12. Controller Gestione Ruoli (PRIORITÀ BASSA)
+#### 11. Controller Gestione Ruoli (PRIORITÀ BASSA)
 
 **Nuovo file:** `src/modules/auth/controllers/RoleController.ts`
 
@@ -623,13 +599,13 @@ class PermissionService {
 - `POST /roles/:id/permissions` - Aggiungi permesso
 - `DELETE /roles/:id/permissions/:permission` - Rimuovi permesso
 
-#### 13. Routes Gestione Ruoli (PRIORITÀ BASSA)
+#### 12. Routes Gestione Ruoli (PRIORITÀ BASSA)
 
 **Nuovo file:** `src/modules/auth/routes/role.routes.ts`
 
 Configurazione route per RoleController
 
-#### 14. Testing (PRIORITÀ MEDIA)
+#### 13. Testing (PRIORITÀ MEDIA)
 
 - [ ] Test modelli (creazione, associazioni)
 - [ ] Test AuthService con RBAC
@@ -651,6 +627,7 @@ Configurazione route per RoleController
 ✅ src/modules/auth/models/ResetToken.ts     (AGGIORNATO - id INT)
 ✅ src/modules/auth/models/associations.ts   (AGGIORNATO - RBAC)
 ✅ src/modules/auth/models/index.ts          (NUOVO - exports)
+✅ src/app.ts                                (AGGIORNATO - registrazione modelli)
 ✅ README.md                                 (AGGIORNATO)
 ✅ RBAC-SYSTEM.md                            (NUOVO)
 ✅ PROJECT-STATUS.md                         (NUOVO - questo file)
@@ -659,7 +636,6 @@ Configurazione route per RoleController
 ### ⚠️ File da Modificare
 
 ```
-⚠️ src/app.ts                                   (registrazione modelli)
 ⚠️ src/modules/auth/types/auth.types.ts         (rimuovi profile/level)
 ⚠️ src/modules/auth/utils/validation.ts         (rimuovi validazioni vecchie)
 ⚠️ src/modules/auth/services/AuthService.ts     (usa roleId, carica permissions)
@@ -686,10 +662,10 @@ Configurazione route per RoleController
 
 ### Fase 1: Completamento Base (PRIORITÀ ALTA)
 
-1. **Aggiornare app.ts**
+1. ~~**Aggiornare app.ts**~~ ✅ COMPLETATO
 
-   - Registrare Role e RolePermission nei modelli
-   - Testare sincronizzazione database
+   - ~~Registrare Role e RolePermission nei modelli~~
+   - ~~Testare sincronizzazione database~~
 
 2. **Aggiornare Types**
 
@@ -703,11 +679,11 @@ Configurazione route per RoleController
    - Creare 9 ruoli predefiniti con permessi
    - Comando: `npm run seed:roles`
 
-4. **Testare Database**
-   - `npm run db:sync`
-   - Verificare creazione tabelle
-   - Eseguire seed
-   - Verificare dati
+4. ~~**Testare Database**~~ ✅ COMPLETATO
+   - ~~`npm run db:sync`~~
+   - ~~Verificare creazione tabelle~~
+   - ~~Eseguire seed~~ (da fare)
+   - ~~Verificare dati~~ (da fare)
 
 ### Fase 2: Aggiornamento Business Logic (PRIORITÀ ALTA)
 
@@ -875,15 +851,30 @@ npm run seed:all           # Seed completo
 - Soluzione: Assicurarsi che il seed ruoli sia stato eseguito
 - Creare almeno un ruolo prima di creare account
 
-**Errore: Foreign key constraint**
+**Errore: Foreign key constraint / Failed to open the referenced table 'roles'** ⚠️ IMPORTANTE
 
-- Soluzione: Verificare ordine sincronizzazione modelli
-- Role deve essere sincronizzato prima di Account
+- Causa: Ordine errato di registrazione modelli in app.ts
+- Soluzione: Rispettare ordine dipendenze FK:
+  ```typescript
+  models: [
+    createRoleModel, // 1️⃣ PRIMO (nessuna FK)
+    createRolePermissionModel, // 2️⃣ (FK → roles)
+    createAccountModel, // 3️⃣ (FK → roles)
+    createSessionModel, // 4️⃣ (FK → accounts)
+    createResetTokenModel, // 5️⃣ (FK → accounts)
+  ];
+  ```
+- **ORDINE CRITICO**: Le tabelle senza FK devono essere create prima di quelle che le referenziano
 
 **Performance lenta con UUID**
 
 - Ricorda: usiamo INTEGER per PK e FK (performance)
 - UUID è solo per identificazione esterna (API)
+
+**Database sync non crea tutte le tabelle**
+
+- Soluzione: DROP manualmente tutte le tabelle e ricrea da zero
+- Comando: `mysql -u root -p -e "USE edg_auth; DROP TABLE IF EXISTS reset_tokens, sessions, role_permissions, accounts, roles;"`
 
 ### Riferimenti Esterni
 
@@ -900,8 +891,8 @@ Quando riprendi il lavoro in una nuova chat, condividi:
 
 1. **Questo documento** (`PROJECT-STATUS.md`)
 2. **RBAC-SYSTEM.md** (sistema autorizzazione completo)
-3. **Stato attuale:** "Modelli database completati, da implementare: app.ts, types, services, middleware"
-4. **Prossimo step:** "Aggiornare app.ts per registrare Role e RolePermission"
+3. **Stato attuale:** "Database funzionante, modelli sincronizzati. Prossimo step: creare seed ruoli o aggiornare types"
+4. **Prossimo step:** "Creare script seed per ruoli predefiniti" o "Aggiornare auth.types.ts"
 
 ### Template Messaggio Nuova Chat
 
@@ -909,10 +900,12 @@ Quando riprendi il lavoro in una nuova chat, condividi:
 Sto sviluppando l'EDG Auth Service con sistema RBAC bidimensionale.
 
 STATO ATTUALE:
-- ✅ Modelli database completati (Account, Role, RolePermission, Session, ResetToken)
+- ✅ Modelli database completati e sincronizzati
 - ✅ Pattern Dual Key implementato (id INT + uuid)
 - ✅ Associazioni RBAC configurate
-- ⚠️ Da fare: aggiornare app.ts, types, services, middleware
+- ✅ app.ts aggiornato con ordine corretto modelli
+- ✅ Database testato e funzionante (5 tabelle create)
+- ⚠️ Da fare: seed ruoli, aggiornare types, services, middleware
 
 SISTEMA RBAC:
 - Permessi bidimensionali: MODULI (cosa) + AZIONI (come)
@@ -923,11 +916,13 @@ DOCUMENTI DI RIFERIMENTO:
 [Qui incolli PROJECT-STATUS.md e RBAC-SYSTEM.md]
 
 PROSSIMO STEP:
-Aggiornare src/app.ts per registrare i modelli Role e RolePermission.
+Creare script seed per i ruoli predefiniti (root, admin, operatori...)
+oppure aggiornare auth.types.ts per rimuovere profile/level.
 ```
 
 ---
 
-**Documento creato:** Ottobre 2025  
-**Versione:** 1.0  
+**Documento aggiornato:** Ottobre 2025  
+**Versione:** 1.1  
+**Ultimo checkpoint:** Database sincronizzato, modelli registrati, servizio funzionante  
 **Mantenere aggiornato** dopo ogni sessione di sviluppo significativa

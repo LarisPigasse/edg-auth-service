@@ -1,10 +1,17 @@
-// src/app.ts - EDG Auth Service (RISTRUTTURATO PER GESTIRE L'ORDINE DI INIZIALIZZAZIONE)
+// src/app.ts - EDG Auth Service
 import { createServiceConfig } from './core/config/environment';
 import { createServer, ServerModule } from './core/server';
-import { DatabaseManager } from './core/config/database'; // Import necessario per il tipaggio
+import { DatabaseManager } from './core/config/database';
 
 // Import modelli e associazioni
-import { createAccountModel, createSessionModel, createResetTokenModel, setupAuthAssociations } from './modules/auth/models';
+import {
+  createAccountModel,
+  createSessionModel,
+  createResetTokenModel,
+  createRoleModel,
+  createRolePermissionModel,
+  setupAuthAssociations,
+} from './modules/auth/models';
 
 // Import services e routes
 import { AuthService } from './modules/auth/services';
@@ -22,19 +29,25 @@ const config = createServiceConfig({
 });
 
 // ============================================================================
-// REGISTRAZIONE DEL MODULO INIZIALE (solo modelli e associazioni)
+// REGISTRAZIONE DEL MODULO INIZIALE (modelli e associazioni)
 // ============================================================================
 
-// Definiamo un Router fittizio (placeholder) perché il costruttore del server
-// richiede un Router, ma quello reale verrà creato dopo la sync DB.
+// Router placeholder (il vero router verrà creato dopo la sync DB)
 const placeholderRouter = Router();
 
-// Modulo contenente solo la configurazione (modelli e associazioni)
+// Modulo contenente configurazione modelli e associazioni
 const AuthModuleConfig: ServerModule = {
   name: 'auth',
   path: '/auth',
-  router: placeholderRouter, // Placeholder
-  models: [createAccountModel, createSessionModel, createResetTokenModel],
+  router: placeholderRouter,
+  // ⚠️ ORDINE CRITICO: rispetta le dipendenze foreign key!
+  models: [
+    createRoleModel, // 1️⃣ roles (nessuna FK)
+    createRolePermissionModel, // 2️⃣ role_permissions (FK → roles)
+    createAccountModel, // 3️⃣ accounts (FK → roles)
+    createSessionModel, // 4️⃣ sessions (FK → accounts)
+    createResetTokenModel, // 5️⃣ reset_tokens (FK → accounts)
+  ],
   associations: setupAuthAssociations,
 };
 
@@ -44,7 +57,7 @@ const AuthModuleConfig: ServerModule = {
 
 const server = createServer({
   config,
-  modules: [AuthModuleConfig], // Registra subito i modelli e le associazioni
+  modules: [AuthModuleConfig],
 });
 
 // Funzione che gestisce l'inizializzazione dei service e l'avvio finale
@@ -53,29 +66,31 @@ const startServer = async () => {
     console.log(`Avvio ${config.serviceName}...`);
 
     // 1. INIZIALIZZA DATABASE
-    // Questo ora registra e sincronizza i modelli passati in `modules`.
     const dbReady = await server.initializeDatabase();
     if (!dbReady) {
       console.error('Impossibile avviare il servizio senza database');
       process.exit(1);
     }
 
-    // 2. RECUPERA i modelli Sequelize inizializzati dal DatabaseManager
+    // 2. RECUPERA i modelli Sequelize inizializzati
     const databaseManager: DatabaseManager = server.getDatabase();
     const models = databaseManager.getModels();
 
-    // Siccome sappiamo che la sincronizzazione ha avuto successo, i modelli esistono.
+    // Trova i modelli necessari
     const Account = models.find((m: any) => m.name === 'Account');
     const Session = models.find((m: any) => m.name === 'Session');
     const ResetToken = models.find((m: any) => m.name === 'ResetToken');
+    const Role = models.find((m: any) => m.name === 'Role');
+    const RolePermission = models.find((m: any) => m.name === 'RolePermission'); // ✅ AGGIUNTO
 
-    if (!Account || !Session || !ResetToken) {
-      // Errore critico se, dopo la sync, i modelli non sono trovati (non dovrebbe accadere)
-      throw new Error('Errore interno: modelli Sequelize richiesti non trovati dopo inizializzazione.');
+    // ✅ FIXED: Verifica che tutti i modelli siano stati trovati
+    if (!Account || !Session || !ResetToken || !Role || !RolePermission) {
+      throw new Error('Errore: modelli richiesti non trovati dopo inizializzazione');
     }
 
-    // 3. INIZIALIZZA la logica di business (Service e Controller) con i modelli reali
-    const authService = new AuthService(Account, Session, ResetToken);
+    // 3. INIZIALIZZA la logica di business (Service e Controller)
+    // ✅ FIXED: Aggiunto RolePermission come quinto parametro
+    const authService = new AuthService(Account, Session, ResetToken, Role, RolePermission);
     const authController = new AuthController(authService);
     const authRouter = createAuthRouter(authController);
 
@@ -90,11 +105,10 @@ const startServer = async () => {
       console.log(`🌐 Server: http://localhost:${config.port}`);
       console.log(`📊 Database: ${config.database.name}@${config.database.host}`);
       console.log(`📦 Moduli: auth`);
-      console.log(`🏁 Pronto per ricevere richieste!\n`);
-      // Aggiungi qui l'elenco degli endpoint se vuoi, come prima
+      console.log(`🚀 Pronto per ricevere richieste!\n`);
     });
 
-    // Graceful shutdown handlers (rimane come prima)
+    // Graceful shutdown handlers
     const handleShutdown = async (signal: string) => {
       console.log(`\n🔄 Shutdown graceful in corso (${signal})...`);
       try {

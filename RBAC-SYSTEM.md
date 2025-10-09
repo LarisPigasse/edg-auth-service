@@ -1,6 +1,6 @@
-# Sistema di Autorizzazione Bidimensionale (RBAC)
+# Sistema di Autorizzazione RBAC - EDG Auth Service
 
-**Versione:** 1.0  
+**Versione:** 2.0 (Sistema Composto con Wildcards)  
 **Data:** Ottobre 2025  
 **Progetto:** EDG Auth Service
 
@@ -10,517 +10,498 @@
 
 1. [Panoramica](#panoramica)
 2. [Concetto Core](#concetto-core)
-3. [Architettura](#architettura)
-4. [Permessi Disponibili](#permessi-disponibili)
-5. [Logica di Autorizzazione](#logica-di-autorizzazione)
-6. [Esempi Pratici](#esempi-pratici)
-7. [Schema Database](#schema-database)
-8. [Ruoli Predefiniti](#ruoli-predefiniti)
-9. [Implementazione Middleware](#implementazione-middleware)
-10. [Casi d'Uso](#casi-duso)
-11. [Vantaggi del Sistema](#vantaggi-del-sistema)
-12. [Confronto con Altre Soluzioni](#confronto-con-altre-soluzioni)
+3. [Architettura Permessi](#architettura-permessi)
+4. [Moduli del Sistema](#moduli-del-sistema)
+5. [Azioni Disponibili](#azioni-disponibili)
+6. [Ruoli Predefiniti](#ruoli-predefiniti)
+7. [Logica di Autorizzazione](#logica-di-autorizzazione)
+8. [Esempi Pratici](#esempi-pratici)
+9. [Implementazione](#implementazione)
+10. [Schema Database](#schema-database)
+11. [Espansione Futura](#espansione-futura)
 
 ---
 
 ## Panoramica
 
-Il sistema di autorizzazione EDG utilizza un approccio **bidimensionale** basato su due tipologie di permessi ortogonali:
+Il sistema di autorizzazione EDG utilizza un approccio **a permessi composti espliciti con wildcards** per garantire:
 
-1. **MODULI** (dimensione "cosa"): Aree funzionali del sistema
-2. **AZIONI** (dimensione "come"): Operazioni eseguibili
+- **Massima flessibilità** per adattarsi a qualsiasi workflow
+- **Chiarezza ed esplicitezza** - nessun comportamento implicito
+- **Scalabilità** - facilmente estendibile con nuovi moduli e azioni
+- **Standard industriale** - simile a AWS IAM, Kubernetes RBAC, Google Cloud IAM
 
-Un utente può accedere a una risorsa **solo se possiede ENTRAMBI i permessi** necessari (modulo AND azione).
+### Perché Questo Sistema?
 
-### Esempio Concettuale
+Dopo aver valutato diverse alternative (permessi bidimensionali, gerarchie implicite), abbiamo scelto il **sistema composto esplicito** perché:
 
-```
-Utente ha: ['sales', 'warehouse', 'read', 'create', 'update']
-
-Per modificare un cliente serve: modulo 'sales' AND azione 'update'
-✅ L'utente ha entrambi → ACCESSO CONSENTITO
-
-Per eliminare un cliente serve: modulo 'sales' AND azione 'delete'
-❌ L'utente ha 'sales' ma NON ha 'delete' → ACCESSO NEGATO
-
-Per vedere prodotti serve: modulo 'warehouse' AND azione 'read'
-✅ L'utente ha entrambi → ACCESSO CONSENTITO
-
-Per modificare prodotti serve: modulo 'warehouse' AND azione 'update'
-✅ L'utente ha entrambi → ACCESSO CONSENTITO (anche se non era ovvio!)
-```
+1. **Nessuna ambiguità**: Se un utente ha `spedizioni.create`, può SOLO creare spedizioni (non implica automaticamente altri permessi)
+2. **Supporta workflow complessi**: Un operatore può creare ma non modificare, oppure modificare ma non eliminare - qualsiasi combinazione è possibile
+3. **Facile debug**: Se qualcuno non può fare un'azione, è immediato capire quale permesso manca
+4. **Futuro-proof**: Nuovi moduli o azioni si aggiungono senza modificare la logica esistente
 
 ---
 
 ## Concetto Core
 
-### Due Dimensioni Ortogonali
+### Struttura Permessi
+
+I permessi seguono la notazione **`modulo.azione`**:
 
 ```
-        read    create   update   delete   approve   export
-      +-------+--------+--------+--------+---------+--------+
-sales |   ?   |   ?    |   ?    |   ?    |    ?    |   ?    |
-      +-------+--------+--------+--------+---------+--------+
-ware- |   ?   |   ?    |   ?    |   ?    |    ?    |   ?    |
-house +-------+--------+--------+--------+---------+--------+
-accou-|   ?   |   ?    |   ?    |   ?    |    ?    |   ?    |
-nting +-------+--------+--------+--------+---------+--------+
-repor-|   ?   |   ?    |   ?    |   ?    |    ?    |   ?    |
-ts    +-------+--------+--------+--------+---------+--------+
-admin |   ?   |   ?    |   ?    |   ?    |    ?    |   ?    |
-      +-------+--------+--------+--------+---------+--------+
+spedizioni.read     → Visualizzare spedizioni
+spedizioni.create   → Creare nuove spedizioni
+gestione.*          → Wildcard: tutte le azioni sul modulo gestione
+*                   → Root: accesso completo al sistema
 ```
 
-Ogni cella rappresenta una **combinazione modulo+azione**.  
-L'utente ha accesso alla cella **solo se possiede ENTRAMBE le coordinate**.
+### Regole Fondamentali
 
-### Formula di Accesso
-
-```
-hasAccess = hasModule(modulo) AND hasAction(azione)
-```
-
-### Permesso Speciale: '\*' (Root)
-
-Il permesso `*` (wildcard) fornisce **accesso completo a tutto**:
-
-- `permissions: ['*']` → Tutte le celle della matrice sono ✅
+1. **Ogni permesso è esplicito**: Non esistono permessi impliciti o gerarchie
+2. **Wildcard modulo** (`modulo.*`): Garantisce TUTTE le azioni su quel modulo
+3. **Wildcard globale** (`*`): Solo per root, garantisce accesso completo
+4. **Nessuna gerarchia**: `create` NON implica `read`, `update` NON implica `read` - tutto esplicito
 
 ---
 
-## Architettura
+## Architettura Permessi
 
-### Struttura Permessi
+### Formula di Verifica
 
 ```typescript
-type Permission = Module | Action;
+hasPermission(userPermissions, modulo, azione) {
+  // 1. Root ha tutto
+  if (userPermissions.includes('*')) return true;
 
-// Esempio utente
+  // 2. Wildcard modulo
+  if (userPermissions.includes(`${modulo}.*`)) return true;
+
+  // 3. Permesso specifico
+  if (userPermissions.includes(`${modulo}.${azione}`)) return true;
+
+  return false;
+}
+```
+
+### Esempio Pratico
+
+```typescript
+// Utente con questi permessi
+permissions: ['spedizioni.read', 'spedizioni.create', 'report.*']
+
+// Verifiche
+hasPermission('spedizioni', 'read')    → ✅ true  (ha spedizioni.read)
+hasPermission('spedizioni', 'create')  → ✅ true  (ha spedizioni.create)
+hasPermission('spedizioni', 'update')  → ❌ false (NON ha spedizioni.update)
+hasPermission('spedizioni', 'delete')  → ❌ false (NON ha spedizioni.delete)
+hasPermission('report', 'read')        → ✅ true  (ha report.*)
+hasPermission('report', 'export')      → ✅ true  (ha report.*)
+hasPermission('gestione', 'read')      → ❌ false (NON ha gestione.*)
+```
+
+---
+
+## Moduli del Sistema
+
+### Moduli Attuali
+
+| Modulo       | Descrizione                     | Risorse Coperte                        |
+| ------------ | ------------------------------- | -------------------------------------- |
+| `spedizioni` | Gestione spedizioni e ordini    | Ordini, tracking, stato spedizioni     |
+| `gestione`   | Amministrazione sistema         | Utenti, ruoli, configurazioni business |
+| `report`     | Report e statistiche            | Dashboard, analytics, export dati      |
+| `sistema`    | Configurazioni critiche sistema | Backup, config avanzate, manutenzione  |
+
+### Caratteristiche Moduli
+
+**`spedizioni`**
+
+- Modulo operativo principale
+- Accessibile a operatori e guest (limitato)
+
+**`gestione`**
+
+- Modulo amministrativo
+- Solo admin e root
+- Gestione utenti, ruoli, permessi
+
+**`report`**
+
+- Visualizzazione dati e analytics
+- Accessibile in lettura anche a guest
+- Export limitato ai ruoli autorizzati
+
+**`sistema`**
+
+- Configurazioni critiche
+- **Solo root** - protezione massima
+- Backup, config server, manutenzione
+
+---
+
+## Azioni Disponibili
+
+### Azioni Standard
+
+Ogni modulo supporta queste azioni base:
+
+| Azione   | Descrizione                  | Esempio                    |
+| -------- | ---------------------------- | -------------------------- |
+| `read`   | Visualizzare risorse         | Vedere lista ordini        |
+| `create` | Creare nuove risorse         | Creare nuovo ordine        |
+| `update` | Modificare risorse esistenti | Aggiornare stato ordine    |
+| `delete` | Eliminare risorse            | Eliminare ordine annullato |
+
+### Azioni Speciali
+
+Alcune azioni sono specifiche per certi moduli:
+
+| Azione    | Moduli                   | Descrizione                      |
+| --------- | ------------------------ | -------------------------------- |
+| `export`  | `report`, `spedizioni`   | Esportare dati in Excel/PDF      |
+| `approve` | `spedizioni`, `gestione` | Approvare/autorizzare (workflow) |
+
+### Wildcard
+
+| Wildcard   | Significato                    |
+| ---------- | ------------------------------ |
+| `modulo.*` | Tutte le azioni su quel modulo |
+| `*`        | Accesso completo (solo root)   |
+
+---
+
+## Ruoli Predefiniti
+
+### 1. root
+
+**Descrizione:** Accesso completo assoluto al sistema
+
+```typescript
+permissions: ['*'];
+```
+
+**Cosa può fare:**
+
+- ✅ Tutto su tutti i moduli
+- ✅ Accesso configurazioni sistema critiche
+- ✅ Gestione completa utenti e ruoli
+- ✅ Backup e manutenzione sistema
+
+**Quando usarlo:**
+
+- Super amministratore
+- Owner del sistema
+- Operazioni di sistema critiche
+
+---
+
+### 2. admin
+
+**Descrizione:** Amministratore del sistema (NO accesso sistema critico)
+
+```typescript
 permissions: [
-  // MODULI
-  'sales', // Accesso area vendite
-  'warehouse', // Accesso magazzino
-  'reports', // Accesso report
-
-  // AZIONI
-  'read', // Può leggere
-  'create', // Può creare
-  'update', // Può modificare
-  // NO 'delete' → Non può eliminare nulla
+  'spedizioni.*',
+  'gestione.*',
+  'report.*',
+  // NO 'sistema.*' - solo root può accedere
 ];
 ```
 
-### Database Schema
+**Cosa può fare:**
 
-```
-accounts
-├── id (UUID)
-├── email
-├── password
-├── accountType
-├── roleId (FK → roles.id)
-└── ...
+- ✅ Gestione completa spedizioni (CRUD)
+- ✅ Gestione utenti, ruoli, permessi
+- ✅ Creazione ed export report
+- ❌ NON può modificare config sistema critiche (backup, server, ecc.)
 
-roles
-├── id (UUID)
-├── name
-├── description
-└── isSystem
+**Quando usarlo:**
 
-role_permissions
-├── id (UUID)
-├── roleId (FK → roles.id)
-└── permission (VARCHAR)  ← 'sales' | 'read' | 'warehouse' | ...
-```
-
-**Nota importante:** Non servono tabelle incrociate moduli×azioni! I permessi sono semplicemente stringhe nella tabella `role_permissions`.
+- Manager operativi
+- Responsabili di area
+- Amministratori delegati
 
 ---
 
-## Permessi Disponibili
+### 3. operatore
 
-### MODULI (Area Funzionali)
+**Descrizione:** Operatore standard (solo operativo, NO gestione)
 
-| Permesso     | Descrizione                              | Risorse Coperte                |
-| ------------ | ---------------------------------------- | ------------------------------ |
-| `*`          | Accesso a tutti i moduli (solo root)     | Tutto                          |
-| `sales`      | Area vendite                             | clienti, ordini, preventivi    |
-| `warehouse`  | Area magazzino                           | prodotti, giacenze, movimenti  |
-| `accounting` | Area contabilità                         | fatture, pagamenti, scadenze   |
-| `reports`    | Area report                              | report, statistiche, analytics |
-| `admin`      | Amministrazione sistema                  | utenti, ruoli, configurazioni  |
-| `partners`   | Gestione partner                         | anagrafica partner, contratti  |
-| `agents`     | Gestione agenti                          | anagrafica agenti, commissioni |
-| `system`     | Configurazioni sistema (solo root/admin) | backup, config avanzate        |
-
-**Totale moduli:** ~9 permessi
-
-### AZIONI (Operazioni)
-
-| Permesso  | Descrizione                      | Applicabile A              |
-| --------- | -------------------------------- | -------------------------- |
-| `*`       | Tutte le azioni (solo root)      | Tutto                      |
-| `read`    | Visualizzare risorse             | Tutte le risorse           |
-| `create`  | Creare nuove risorse             | Tutte le risorse           |
-| `update`  | Modificare risorse esistenti     | Tutte le risorse           |
-| `delete`  | Eliminare risorse                | Tutte le risorse           |
-| `approve` | Approvare (azione speciale)      | Fatture, ordini, richieste |
-| `export`  | Esportare dati (azione speciale) | Report, dati               |
-
-**Totale azioni:** ~7 permessi
-
-### Totale Permessi Sistema
-
-```
-9 moduli + 7 azioni = 16 permessi totali
+```typescript
+permissions: [
+  'spedizioni.*',
+  'report.read',
+  'report.create',
+  'report.export',
+  // NO 'gestione.*' - non può gestire utenti/ruoli
+  // NO 'sistema.*'
+];
 ```
 
-Invece di 50+ permessi nel sistema tradizionale (sales.read, sales.create, warehouse.read, warehouse.create, ecc.)!
+**Cosa può fare:**
+
+- ✅ Gestione completa spedizioni (CRUD)
+- ✅ Visualizzare report
+- ✅ Creare report personalizzati
+- ✅ Esportare dati
+- ❌ NON può gestire utenti/ruoli
+- ❌ NON può modificare configurazioni
+
+**Quando usarlo:**
+
+- Operatori quotidiani
+- Staff operativo
+- Utenti interni standard
+
+---
+
+### 4. guest
+
+**Descrizione:** Accesso limitato in sola lettura
+
+```typescript
+permissions: [
+  'spedizioni.read',
+  'report.read',
+  // Solo visualizzazione, nessuna modifica
+];
+```
+
+**Cosa può fare:**
+
+- ✅ Visualizzare spedizioni
+- ✅ Visualizzare report
+- ❌ NON può creare/modificare/eliminare nulla
+- ❌ NON può esportare dati
+- ❌ NON può accedere a gestione
+
+**Quando usarlo:**
+
+- Clienti esterni
+- Partner con accesso limitato
+- Account demo
+- Visualizzatori
 
 ---
 
 ## Logica di Autorizzazione
 
-### Algoritmo di Verifica
+### Matrice Permessi
 
-```typescript
-function hasAccess(userPermissions: string[], module: string, action: string): boolean {
-  // 1. Root ha tutto
-  if (userPermissions.includes('*')) {
-    return true;
-  }
-
-  // 2. Verifica modulo
-  const hasModule = userPermissions.includes(module);
-
-  // 3. Verifica azione
-  const hasAction = userPermissions.includes(action);
-
-  // 4. Serve ENTRAMBI
-  return hasModule && hasAction;
-}
+```
+              | read  | create | update | delete | export |
+--------------|-------|--------|--------|--------|--------|
+spedizioni    |       |        |        |        |   ✓    |
+gestione      |       |        |        |        |        |
+report        |   ✓   |   ✓    |        |        |   ✓    |
+sistema       |       |        |        |        |        |
 ```
 
-### Pseudo-codice Middleware
+**root:**
 
-```typescript
-// Route protetta
-router.put('/clients/:id', requirePermission('sales', 'update'), updateClient);
+```
+              | read  | create | update | delete | export |
+--------------|-------|--------|--------|--------|--------|
+spedizioni    |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+gestione      |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+report        |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+sistema       |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+```
 
-// Il middleware verifica:
-function requirePermission(module, action) {
-  return (req, res, next) => {
-    const userPerms = req.account.permissions; // es. ['sales', 'read', 'update']
+**admin:**
 
-    if (hasAccess(userPerms, module, action)) {
-      next(); // ✅ Accesso consentito
-    } else {
-      res.status(403).json({ error: 'Permessi insufficienti' }); // ❌ Negato
-    }
-  };
-}
+```
+              | read  | create | update | delete | export |
+--------------|-------|--------|--------|--------|--------|
+spedizioni    |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+gestione      |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+report        |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+sistema       |   ✗   |   ✗    |   ✗    |   ✗    |   ✗    |
+```
+
+**operatore:**
+
+```
+              | read  | create | update | delete | export |
+--------------|-------|--------|--------|--------|--------|
+spedizioni    |   ✓   |   ✓    |   ✓    |   ✓    |   ✓    |
+gestione      |   ✗   |   ✗    |   ✗    |   ✗    |   ✗    |
+report        |   ✓   |   ✓    |        |        |   ✓    |
+sistema       |   ✗   |   ✗    |   ✗    |   ✗    |   ✗    |
+```
+
+**guest:**
+
+```
+              | read  | create | update | delete | export |
+--------------|-------|--------|--------|--------|--------|
+spedizioni    |   ✓   |   ✗    |   ✗    |   ✗    |   ✗    |
+gestione      |   ✗   |   ✗    |   ✗    |   ✗    |   ✗    |
+report        |   ✓   |   ✗    |   ✗    |   ✗    |   ✗    |
+sistema       |   ✗   |   ✗    |   ✗    |   ✗    |   ✗    |
 ```
 
 ---
 
 ## Esempi Pratici
 
-### Esempio 1: Operatore Vendite Standard
-
-**Permessi assegnati:**
+### Caso 1: Operatore Crea Spedizione
 
 ```typescript
-permissions: ['sales', 'reports', 'read', 'create', 'update'];
+// Operatore con permessi
+permissions: ['spedizioni.*', 'report.read', 'report.create', 'report.export']
+
+// Tenta di creare spedizione
+POST /spedizioni
+requirePermission('spedizioni', 'create')
+
+// Verifica
+hasPermission(['spedizioni.*', ...], 'spedizioni', 'create')
+→ ✅ true (ha spedizioni.*)
+→ ACCESSO CONSENTITO
 ```
 
-**Matrice permessi risultante:**
-
-```
-              | read | create | update | delete | approve | export |
---------------|------|--------|--------|--------|---------|--------|
-sales         |  ✓   |   ✓    |   ✓    |   ✗    |    ✗    |   ✗    |
-warehouse     |  ✗   |   ✗    |   ✗    |   ✗    |    ✗    |   ✗    |
-accounting    |  ✗   |   ✗    |   ✗    |   ✗    |    ✗    |   ✗    |
-reports       |  ✓   |   ✓    |   ✓    |   ✗    |    ✗    |   ✗    |
-admin         |  ✗   |   ✗    |   ✗    |   ✗    |    ✗    |   ✗    |
-```
-
-**Cosa può fare:**
-
-- ✅ Visualizzare clienti (`sales` + `read`)
-- ✅ Creare clienti (`sales` + `create`)
-- ✅ Modificare clienti (`sales` + `update`)
-- ❌ Eliminare clienti (manca `delete`)
-- ✅ Visualizzare ordini (`sales` + `read`)
-- ✅ Creare ordini (`sales` + `create`)
-- ✅ Visualizzare report (`reports` + `read`)
-- ❌ Vedere prodotti (manca `warehouse`)
-
-### Esempio 2: Operatore Magazzino
-
-**Permessi assegnati:**
+### Caso 2: Guest Tenta di Modificare
 
 ```typescript
-permissions: ['warehouse', 'sales', 'read', 'create', 'update', 'delete'];
+// Guest con permessi
+permissions: ['spedizioni.read', 'report.read']
+
+// Tenta di modificare spedizione
+PUT /spedizioni/:id
+requirePermission('spedizioni', 'update')
+
+// Verifica
+hasPermission(['spedizioni.read', 'report.read'], 'spedizioni', 'update')
+→ ❌ false (ha solo spedizioni.read)
+→ ACCESSO NEGATO (403 Forbidden)
 ```
 
-**Cosa può fare:**
-
-- ✅ Gestione completa magazzino (CRUD completo)
-- ✅ Visualizzare ordini per evadere (`sales` + `read`)
-- ❌ Modificare ordini (manca `sales` + `update`)
-- ❌ Vedere contabilità (manca `accounting`)
-
-### Esempio 3: Contabile
-
-**Permessi assegnati:**
+### Caso 3: Admin Gestisce Utenti
 
 ```typescript
-permissions: ['accounting', 'sales', 'reports', 'read', 'create', 'update', 'approve', 'export'];
+// Admin con permessi
+permissions: ['spedizioni.*', 'gestione.*', 'report.*']
+
+// Tenta di creare utente
+POST /users
+requirePermission('gestione', 'create')
+
+// Verifica
+hasPermission([..., 'gestione.*', ...], 'gestione', 'create')
+→ ✅ true (ha gestione.*)
+→ ACCESSO CONSENTITO
 ```
 
-**Cosa può fare:**
-
-- ✅ Gestione completa contabilità
-- ✅ Approvare fatture (`accounting` + `approve`)
-- ✅ Visualizzare vendite (`sales` + `read`)
-- ❌ Modificare clienti (ha `sales` + `read` ma NON `sales` + `update`)
-- ✅ Esportare report (`reports` + `export`)
-- ❌ Eliminare fatture (manca `delete` per sicurezza contabile)
-
-### Esempio 4: Admin
-
-**Permessi assegnati:**
+### Caso 4: Admin Tenta Config Sistema
 
 ```typescript
-permissions: [
-  'sales',
-  'warehouse',
-  'accounting',
-  'reports',
-  'admin',
-  'partners',
-  'agents',
-  'read',
-  'create',
-  'update',
-  'delete',
-  'approve',
-  'export',
-];
-// NO 'system' → Non può modificare config sistema
+// Admin con permessi
+permissions: ['spedizioni.*', 'gestione.*', 'report.*']
+
+// Tenta di modificare config sistema
+POST /system/backup
+requirePermission('sistema', 'create')
+
+// Verifica
+hasPermission([..., 'gestione.*', ...], 'sistema', 'create')
+→ ❌ false (NON ha sistema.*)
+→ ACCESSO NEGATO (403 Forbidden)
+→ Solo root può fare backup
 ```
 
-**Cosa può fare:**
-
-- ✅ Praticamente tutto
-- ❌ Solo root può accedere a configurazioni sistema critiche
-
-### Esempio 5: Operatore ReadOnly
-
-**Permessi assegnati:**
+### Caso 5: Operatore Export Report
 
 ```typescript
-permissions: ['sales', 'warehouse', 'accounting', 'reports', 'read'];
-```
+// Operatore con permessi
+permissions: ['spedizioni.*', 'report.read', 'report.create', 'report.export']
 
-**Cosa può fare:**
+// Tenta di esportare report
+POST /reports/export
+requirePermission('report', 'export')
 
-- ✅ Visualizzare tutto in 4 moduli
-- ❌ Non può creare/modificare/eliminare NULLA (manca `create`, `update`, `delete`)
-
----
-
-## Schema Database
-
-### Tabelle
-
-```sql
--- Ruoli
-CREATE TABLE roles (
-  id UUID PRIMARY KEY,
-  name VARCHAR(50) UNIQUE NOT NULL,
-  description TEXT,
-  isSystem BOOLEAN DEFAULT false,
-  createdAt DATETIME,
-  updatedAt DATETIME
-);
-
--- Permessi dei ruoli (semplice lista)
-CREATE TABLE role_permissions (
-  id UUID PRIMARY KEY,
-  roleId UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-  permission VARCHAR(50) NOT NULL,  -- 'sales' | 'read' | 'warehouse' | ...
-  createdAt DATETIME,
-  UNIQUE(roleId, permission)
-);
-
--- Accounts con ruolo
-CREATE TABLE accounts (
-  id UUID PRIMARY KEY,
-  email VARCHAR(255) NOT NULL,
-  password VARCHAR(255),
-  accountType ENUM('operatore', 'partner', 'cliente', 'agente'),
-  entityId UUID NOT NULL,
-  roleId UUID NOT NULL REFERENCES roles(id),  -- ← Link al ruolo
-  isActive BOOLEAN DEFAULT true,
-  isVerified BOOLEAN DEFAULT false,
-  lastLogin DATETIME,
-  createdAt DATETIME,
-  updatedAt DATETIME,
-  UNIQUE(email, accountType)
-);
-```
-
-### Esempio Dati
-
-```sql
--- Ruolo operatore vendite standard
-INSERT INTO roles VALUES
-  ('uuid-1', 'operatore_vendite_standard', 'Operatore vendite senza delete', false);
-
--- Permessi del ruolo
-INSERT INTO role_permissions (roleId, permission) VALUES
-  ('uuid-1', 'sales'),
-  ('uuid-1', 'reports'),
-  ('uuid-1', 'read'),
-  ('uuid-1', 'create'),
-  ('uuid-1', 'update');
-  -- NO delete!
-
--- Account con questo ruolo
-INSERT INTO accounts VALUES
-  ('uuid-account', 'mario.rossi@edg.it', 'hash...', 'operatore', 'uuid-entity', 'uuid-1', ...);
+// Verifica
+hasPermission([..., 'report.export'], 'report', 'export')
+→ ✅ true (ha report.export esplicito)
+→ ACCESSO CONSENTITO
 ```
 
 ---
 
-## Ruoli Predefiniti
+## Implementazione
 
-### Root
-
-```typescript
-permissions: ['*'];
-```
-
-**Descrizione:** Accesso completo a tutto, nessuna restrizione.
-
-### Admin
+### PermissionChecker Class
 
 ```typescript
-permissions: [
-  'sales',
-  'warehouse',
-  'accounting',
-  'reports',
-  'admin',
-  'partners',
-  'agents',
-  'read',
-  'create',
-  'update',
-  'delete',
-  'approve',
-  'export',
-];
+export class PermissionChecker {
+  /**
+   * Verifica se l'utente ha il permesso richiesto
+   */
+  static hasPermission(userPermissions: string[], module: string, action: string): boolean {
+    // 1. Root ha tutto
+    if (userPermissions.includes('*')) {
+      return true;
+    }
+
+    // 2. Wildcard modulo (es. 'spedizioni.*')
+    if (userPermissions.includes(`${module}.*`)) {
+      return true;
+    }
+
+    // 3. Permesso specifico (es. 'spedizioni.read')
+    if (userPermissions.includes(`${module}.${action}`)) {
+      return true;
+    }
+
+    // 4. Nessun permesso trovato
+    return false;
+  }
+
+  /**
+   * Verifica se ha TUTTI i permessi richiesti
+   */
+  static hasAllPermissions(userPermissions: string[], requirements: Array<{ module: string; action: string }>): boolean {
+    return requirements.every(req => this.hasPermission(userPermissions, req.module, req.action));
+  }
+
+  /**
+   * Verifica se ha ALMENO UNO dei permessi
+   */
+  static hasAnyPermission(userPermissions: string[], requirements: Array<{ module: string; action: string }>): boolean {
+    return requirements.some(req => this.hasPermission(userPermissions, req.module, req.action));
+  }
+}
 ```
 
-**Descrizione:** Amministratore con accesso quasi completo. Non può modificare configurazioni sistema critiche.
-
-### Operatore Vendite Full
-
-```typescript
-permissions: ['sales', 'reports', 'read', 'create', 'update', 'delete', 'export'];
-```
-
-**Descrizione:** Gestione completa area vendite + export report.
-
-### Operatore Vendite Standard
-
-```typescript
-permissions: ['sales', 'reports', 'read', 'create', 'update', 'export'];
-```
-
-**Descrizione:** Gestione vendite senza possibilità di eliminare.
-
-### Operatore Vendite Junior
-
-```typescript
-permissions: ['sales', 'reports', 'read', 'create'];
-```
-
-**Descrizione:** Solo lettura e creazione, non può modificare o eliminare.
-
-### Operatore Magazzino
-
-```typescript
-permissions: ['warehouse', 'sales', 'read', 'create', 'update', 'delete'];
-```
-
-**Descrizione:** Gestione completa magazzino + visualizzazione ordini.
-
-### Contabile
-
-```typescript
-permissions: ['accounting', 'sales', 'reports', 'read', 'create', 'update', 'approve', 'export'];
-```
-
-**Descrizione:** Gestione contabilità completa, può approvare fatture. Non può eliminare per sicurezza.
-
-### Operatore Report/Analytics
-
-```typescript
-permissions: ['sales', 'warehouse', 'accounting', 'reports', 'read', 'create', 'export'];
-```
-
-**Descrizione:** Accesso lettura ovunque, può creare ed esportare report. Non può modificare dati operativi.
-
-### Operatore ReadOnly
-
-```typescript
-permissions: ['sales', 'warehouse', 'accounting', 'reports', 'read'];
-```
-
-**Descrizione:** Solo visualizzazione, nessuna modifica possibile.
-
-### Guest
-
-```typescript
-permissions: ['sales', 'reports', 'read'];
-```
-
-**Descrizione:** Accesso minimo, solo visualizzazione vendite e report.
-
----
-
-## Implementazione Middleware
-
-### Middleware Principale
+### Middleware Express
 
 ```typescript
 /**
- * Richiede modulo + azione
- * Uso: requirePermission('sales', 'update')
+ * Middleware per richiedere permesso specifico
+ * Uso: requirePermission('spedizioni', 'create')
  */
 export const requirePermission = (module: string, action: string) => {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const account = req.account;
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const account = (req as any).account;
 
     if (!account || !account.permissions) {
-      return res.status(401).json({
+      res.status(401).json({
         success: false,
         error: 'Autenticazione richiesta',
       });
+      return;
     }
 
     const hasAccess = PermissionChecker.hasPermission(account.permissions, module, action);
 
     if (!hasAccess) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: 'Permessi insufficienti',
         required: { module, action },
+        message: `Richiede permesso: ${module}.${action}`,
       });
+      return;
     }
 
     next();
@@ -537,338 +518,210 @@ import { requirePermission } from './permissionMiddleware';
 
 const router = Router();
 
-// ==================== CLIENTI ====================
-router.get('/clients', authenticate, requirePermission('sales', 'read'), getClientsHandler);
+// ==================== SPEDIZIONI ====================
+router.get('/spedizioni', authenticate, requirePermission('spedizioni', 'read'), getShipmentsHandler);
 
-router.post('/clients', authenticate, requirePermission('sales', 'create'), createClientHandler);
+router.post('/spedizioni', authenticate, requirePermission('spedizioni', 'create'), createShipmentHandler);
 
-router.put('/clients/:id', authenticate, requirePermission('sales', 'update'), updateClientHandler);
+router.put('/spedizioni/:id', authenticate, requirePermission('spedizioni', 'update'), updateShipmentHandler);
 
-router.delete('/clients/:id', authenticate, requirePermission('sales', 'delete'), deleteClientHandler);
-
-// ==================== PRODOTTI ====================
-router.get('/products', authenticate, requirePermission('warehouse', 'read'));
-
-router.post('/products', authenticate, requirePermission('warehouse', 'create'));
-
-// ==================== FATTURE ====================
-router.post('/invoices/:id/approve', authenticate, requirePermission('accounting', 'approve'));
+router.delete('/spedizioni/:id', authenticate, requirePermission('spedizioni', 'delete'), deleteShipmentHandler);
 
 // ==================== REPORT ====================
-router.post('/reports/export', authenticate, requirePermission('reports', 'export'));
-```
+router.get('/reports', authenticate, requirePermission('report', 'read'));
 
-### Middleware Alternativi
+router.post('/reports/export', authenticate, requirePermission('report', 'export'));
 
-```typescript
-// Richiede solo modulo (qualsiasi azione)
-requireModule('sales');
+// ==================== GESTIONE UTENTI ====================
+router.get('/users', authenticate, requirePermission('gestione', 'read'));
 
-// Richiede solo azione (qualsiasi modulo)
-requireAction('delete');
+router.post('/users', authenticate, requirePermission('gestione', 'create'));
 
-// Usa mapping risorse predefinito
-requireResource('clients.update'); // → tradotto in ('sales', 'update')
+// ==================== SISTEMA (solo root) ====================
+router.post('/system/backup', authenticate, requirePermission('sistema', 'create'));
 ```
 
 ---
 
-## Casi d'Uso
+## Schema Database
 
-### Caso 1: Separare Lettura da Modifica
-
-**Problema:** Alcuni operatori possono solo vedere, altri possono modificare.
-
-**Soluzione:**
-
-```typescript
-// Junior: può solo vedere
-permissions: ['sales', 'read'];
-
-// Senior: può vedere e modificare
-permissions: ['sales', 'read', 'update'];
-```
-
-### Caso 2: Approvazione Fatture
-
-**Problema:** Solo alcuni utenti possono approvare fatture.
-
-**Soluzione:**
-
-```typescript
-// Contabile normale: può creare fatture
-permissions: ['accounting', 'read', 'create', 'update'];
-
-// Contabile senior: può anche approvare
-permissions: ['accounting', 'read', 'create', 'update', 'approve'];
-```
-
-### Caso 3: Export Dati Sensibili
-
-**Problema:** Non tutti possono esportare dati.
-
-**Soluzione:**
-
-```typescript
-// Operatore normale: può vedere
-permissions: ['sales', 'read'];
-
-// Manager: può vedere ed esportare
-permissions: ['sales', 'read', 'export'];
-```
-
-### Caso 4: Protezione Delete
-
-**Problema:** Il delete è pericoloso, limitarlo.
-
-**Soluzione:**
-
-```typescript
-// Maggior parte operatori: NON hanno 'delete'
-permissions: ['sales', 'read', 'create', 'update'];
-
-// Solo admin e senior: hanno 'delete'
-permissions: ['sales', 'read', 'create', 'update', 'delete'];
-```
-
-### Caso 5: Ruolo Cross-Funzionale
-
-**Problema:** Manager che deve vedere più aree ma non modificare.
-
-**Soluzione:**
-
-```typescript
-permissions: ['sales', 'warehouse', 'accounting', 'reports', 'read', 'export'];
-// Vede tutto, può esportare, non può modificare
-```
-
----
-
-## Vantaggi del Sistema
-
-### 1. Numero Ridotto di Permessi
-
-**Confronto:**
-
-- Sistema tradizionale: 50+ permessi (sales.read, sales.create, warehouse.read, ...)
-- Sistema bidimensionale: ~16 permessi (9 moduli + 7 azioni)
-
-### 2. Combinazioni Potenti
-
-Con 16 permessi base puoi creare **centinaia di configurazioni diverse**:
-
-```
-9 moduli × 7 azioni = 63 possibili combinazioni
-```
-
-### 3. Facile da Capire
-
-```typescript
-// Immediato da leggere
-requirePermission('sales', 'update');
-// → "Serve accesso vendite E capacità di modificare"
-
-// Vs sistema tradizionale
-requirePermission('clients.update', 'orders.update', 'quotes.update');
-// → Ripetitivo e prolisso
-```
-
-### 4. Manutenzione Semplice
-
-**Aggiungere nuovo modulo:**
-
-```typescript
-// Aggiungi solo 1 permesso
-'logistics'; // → Automaticamente combinabile con tutte le azioni
-```
-
-**Aggiungere nuova azione:**
-
-```typescript
-// Aggiungi solo 1 permesso
-'archive'; // → Automaticamente applicabile a tutti i moduli
-```
-
-### 5. Granularità Perfetta
-
-Puoi controllare:
-
-- **Per area**: "Accesso a vendite sì, magazzino no"
-- **Per azione**: "Può creare e leggere, ma non modificare o eliminare"
-- **Combinato**: "Può leggere vendite e magazzino, ma modificare solo magazzino"
-
-### 6. Database Leggero
+### Tabelle
 
 ```sql
--- Per operatore vendite standard serve solo:
-INSERT INTO role_permissions VALUES
-  ('uuid', 'sales'),
-  ('uuid', 'reports'),
-  ('uuid', 'read'),
-  ('uuid', 'create'),
-  ('uuid', 'update');
-
--- Invece di 10+ righe nel sistema tradizionale
-```
-
----
-
-## Confronto con Altre Soluzioni
-
-### Soluzione A: Permessi per Risorsa
-
-```typescript
-permissions: [
-  'clients.read',
-  'clients.create',
-  'clients.update',
-  'clients.delete',
-  'orders.read',
-  'orders.create',
-  'orders.update',
-  'orders.delete',
-  'products.read',
-  'products.create',
-  'products.update',
-  'products.delete',
-  // ... 50+ permessi totali
-];
-```
-
-**Problemi:**
-
-- ❌ Esplosione permessi
-- ❌ Ripetitivo
-- ❌ Difficile manutenzione
-- ❌ Database pesante
-
-### Soluzione B: Permessi Generici Globali
-
-```typescript
-permissions: ['read', 'create', 'update', 'delete'];
-```
-
-**Problemi:**
-
-- ❌ Zero granularità per area
-- ❌ 'update' = modifica TUTTO (clienti, ordini, config sistema, ecc.)
-- ❌ Impossibile separare accessi per modulo
-
-### Soluzione C: Sistema Bidimensionale (SCELTO) ✅
-
-```typescript
-permissions: ['sales', 'warehouse', 'read', 'create', 'update'];
-```
-
-**Vantaggi:**
-
-- ✅ Pochi permessi (16 base)
-- ✅ Granularità perfetta
-- ✅ Combinazioni infinite
-- ✅ Facile manutenzione
-- ✅ Intuitivo
-
----
-
-## Note Implementative
-
-### Caricamento Permessi in Token JWT
-
-```typescript
-// Nel token JWT salva solo l'ID ruolo
-const accessToken = jwt.sign(
-  {
-    accountId: account.id,
-    email: account.email,
-    roleId: account.roleId, // ← Solo ID
-  },
-  secret
+-- Ruoli
+CREATE TABLE roles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  uuid CHAR(36) NOT NULL UNIQUE,
+  name VARCHAR(50) NOT NULL UNIQUE,
+  description TEXT,
+  isSystem BOOLEAN NOT NULL DEFAULT false,
+  createdAt DATETIME NOT NULL,
+  updatedAt DATETIME NOT NULL
 );
 
-// Al middleware authenticate, carica i permessi
-const role = await Role.findByPk(payload.roleId, {
-  include: [{ model: RolePermission, as: 'permissions' }],
-});
+-- Permessi dei ruoli
+CREATE TABLE role_permissions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  roleId INT NOT NULL,
+  permission VARCHAR(50) NOT NULL,
+  createdAt DATETIME NOT NULL,
 
-req.account = {
-  ...payload,
-  permissions: role.permissions.map(p => p.permission), // ['sales', 'read', ...]
-};
+  FOREIGN KEY (roleId) REFERENCES roles(id) ON DELETE CASCADE,
+  UNIQUE INDEX (roleId, permission)
+);
+
+-- Accounts
+CREATE TABLE accounts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  uuid CHAR(36) NOT NULL UNIQUE,
+  email VARCHAR(255) NOT NULL,
+  roleId INT NOT NULL,
+  -- altri campi...
+
+  FOREIGN KEY (roleId) REFERENCES roles(id) ON DELETE RESTRICT
+);
 ```
 
-**Perché non mettere permessi nel JWT?**
-
-- ✅ Token più leggero
-- ✅ Permessi aggiornabili in real-time (senza re-login)
-- ✅ Revoca permessi immediata
-
-### Performance
-
-**Query ottimizzata:**
+### Dati Seed
 
 ```sql
-SELECT rp.permission
-FROM accounts a
-JOIN roles r ON a.roleId = r.id
-JOIN role_permissions rp ON r.id = rp.roleId
-WHERE a.id = ?
+-- Root
+INSERT INTO roles VALUES (1, 'uuid-1', 'root', 'Accesso completo', true);
+INSERT INTO role_permissions VALUES (NULL, 1, '*');
+
+-- Admin
+INSERT INTO roles VALUES (2, 'uuid-2', 'admin', 'Amministratore', true);
+INSERT INTO role_permissions VALUES
+  (NULL, 2, 'spedizioni.*'),
+  (NULL, 2, 'gestione.*'),
+  (NULL, 2, 'report.*');
+
+-- Operatore
+INSERT INTO roles VALUES (3, 'uuid-3', 'operatore', 'Operatore standard', true);
+INSERT INTO role_permissions VALUES
+  (NULL, 3, 'spedizioni.*'),
+  (NULL, 3, 'report.read'),
+  (NULL, 3, 'report.create'),
+  (NULL, 3, 'report.export');
+
+-- Guest
+INSERT INTO roles VALUES (4, 'uuid-4', 'guest', 'Ospite', true);
+INSERT INTO role_permissions VALUES
+  (NULL, 4, 'spedizioni.read'),
+  (NULL, 4, 'report.read');
 ```
 
-**Cache suggerita:**
+---
 
-- Cache permessi in memoria (Redis) per 5-10 minuti
-- Invalidazione cache su modifica ruolo
+## Espansione Futura
 
-### Estensioni Future
+### Aggiungere Nuovi Moduli
 
-**Wildcard modulo (opzionale):**
+Quando il sistema cresce, aggiungere nuovi moduli è semplice:
 
 ```typescript
-// Per coprire tutti i sottomoduli
-permissions: ['sales.*']; // → sales, sales.quotes, sales.orders, ecc.
+// Nuovo modulo: clienti
+// Aggiungi permessi ai ruoli esistenti
+
+// Admin ottiene accesso completo
+INSERT INTO role_permissions VALUES (NULL, 2, 'clienti.*');
+
+// Operatore ottiene accesso limitato
+INSERT INTO role_permissions VALUES
+  (NULL, 3, 'clienti.read'),
+  (NULL, 3, 'clienti.create'),
+  (NULL, 3, 'clienti.update');
 ```
 
-**Permessi temporanei:**
+### Aggiungere Nuove Azioni
 
 ```typescript
-// Permesso con scadenza
-{ permission: 'system.backup', expiresAt: '2025-12-31' }
+// Nuova azione: 'archive'
+// Usala dove serve
+
+router.post('/spedizioni/:id/archive',
+  authenticate,
+  requirePermission('spedizioni', 'archive')
+);
+
+// Aggiungi ai ruoli
+INSERT INTO role_permissions VALUES (NULL, 2, 'spedizioni.archive');
 ```
+
+### Creare Nuovi Ruoli
+
+```typescript
+// Ruolo custom: operatore_senior
+INSERT INTO roles VALUES (5, 'uuid-5', 'operatore_senior', 'Operatore senior', false);
+INSERT INTO role_permissions VALUES
+  (NULL, 5, 'spedizioni.*'),
+  (NULL, 5, 'report.*'),
+  (NULL, 5, 'gestione.read'); // Può vedere (non modificare) gestione
+```
+
+### Permessi Temporanei (Futuro)
+
+```typescript
+// Estensione futura: permessi con scadenza
+{
+  permission: 'sistema.backup',
+  expiresAt: '2025-12-31T23:59:59Z'
+}
+```
+
+---
+
+## Best Practices
+
+### 1. Principio del Minimo Privilegio
+
+Assegna sempre il minimo set di permessi necessario. Meglio aggiungere permessi dopo che toglierli.
+
+### 2. Usa Wildcards con Cautela
+
+`modulo.*` è comodo ma potente. Usalo solo quando l'utente deve davvero fare TUTTO su quel modulo.
+
+### 3. Proteggi Azioni Critiche
+
+`delete`, `approve`, accesso a `sistema` - richiedono sempre permessi espliciti.
+
+### 4. Documenta Ruoli Custom
+
+Se crei ruoli oltre ai 4 base, documenta il loro scopo e permessi.
+
+### 5. Audit Log
+
+Considera di loggare accessi negati per monitorare tentativi non autorizzati.
 
 ---
 
 ## Checklist Implementazione
 
-- [ ] Creare tabella `roles`
-- [ ] Creare tabella `role_permissions`
-- [ ] Aggiungere `roleId` a tabella `accounts`
-- [ ] Rimuovere campi `profile` e `level` da `accounts`
+- [ ] Creare tabelle `roles` e `role_permissions`
 - [ ] Implementare `PermissionChecker` class
 - [ ] Implementare middleware `requirePermission`
-- [ ] Creare seed per ruoli predefiniti
-- [ ] Aggiornare `AuthService` per gestire ruoli
-- [ ] Aggiornare middleware `authenticate` per caricare permessi
-- [ ] Aggiornare tutte le route con nuovi middleware
-- [ ] Creare UI admin per gestione ruoli (opzionale)
-- [ ] Documentare permessi nel README
-- [ ] Test completi sistema autorizzazione
+- [ ] Creare script seed per 4 ruoli base
+- [ ] Aggiornare `AuthService` per caricare permissions
+- [ ] Proteggere tutte le route con middleware appropriati
+- [ ] Testare matrice permessi completa
+- [ ] Documentare permessi richiesti per ogni endpoint
 
 ---
 
 ## Conclusione
 
-Questo sistema bidimensionale offre il **miglior equilibrio** tra:
+Questo sistema di autorizzazione offre il **miglior equilibrio** tra:
 
-- **Semplicità**: Solo ~16 permessi base
-- **Potenza**: Centinaia di combinazioni possibili
-- **Manutenibilità**: Facile aggiungere moduli/azioni
-- **Chiarezza**: Intuitivo per sviluppatori e amministratori
+- **Semplicità**: Permessi chiari e espliciti
+- **Flessibilità**: Supporta qualsiasi workflow presente e futuro
+- **Scalabilità**: Facilmente estendibile
+- **Standard**: Pattern industriale consolidato
 
-È la soluzione ideale per sistemi complessi che richiedono controllo granulare senza esplodere in complessità.
+È progettato per durare e adattarsi alle esigenze del sistema EDG per anni.
 
 ---
 
 **Documento creato per:** EDG Auth Service  
-**Sistema:** Role-Based Access Control (RBAC) Bidimensionale  
-**Versione:** 1.0  
-**Mantenere aggiornato:** Quando si aggiungono nuovi moduli o azioni
+**Sistema:** RBAC con Permessi Composti e Wildcards  
+**Versione:** 2.0 - Sistema Definitivo  
+**Mantenere aggiornato:** Quando si aggiungono nuovi moduli, azioni o ruoli
