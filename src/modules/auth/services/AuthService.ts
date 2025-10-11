@@ -94,7 +94,6 @@ export class AuthService {
    * Login account
    */
   async login(data: LoginRequest, ipAddress?: string, userAgent?: string): Promise<LoginResponse> {
-    // ✅ FIXED: Usa rolePermissionModel direttamente
     const account = await this.accountModel.findOne({
       where: {
         email: data.email,
@@ -165,6 +164,8 @@ export class AuthService {
         email: account.email,
         accountType: account.accountType,
         roleId: account.roleId,
+        permissions, // ✅ AGGIUNTO: Permessi inclusi nella response
+        roleName: account.role?.name, // ✅ AGGIUNTO: Nome del ruolo incluso nella response
       },
     };
   }
@@ -242,6 +243,8 @@ export class AuthService {
         email: account.email,
         accountType: account.accountType,
         roleId: account.roleId,
+        permissions, // ✅ AGGIUNTO: Permessi inclusi nella response
+        roleName: account.role?.name, // ✅ AGGIUNTO: Nome del ruolo incluso nella response
       },
     };
   }
@@ -420,7 +423,7 @@ export class AuthService {
       ],
     });
 
-    if (!account || !account.role) {
+    if (!account || !account.role || !account.role.permissions) {
       return [];
     }
 

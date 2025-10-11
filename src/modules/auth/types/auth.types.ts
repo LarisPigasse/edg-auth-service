@@ -6,9 +6,6 @@
 
 export type AccountType = 'operatore' | 'partner' | 'cliente' | 'agente';
 
-// ❌ RIMOSSO: ProfileType (non più usato)
-// export type ProfileType = 'root' | 'admin' | 'operatore' | 'guest';
-
 export interface AccountAttributes {
   id: number; // ✅ AGGIORNATO: number invece di string (pattern dual-key)
   uuid: string; // ✅ NUOVO: UUID pubblico
@@ -19,8 +16,6 @@ export interface AccountAttributes {
   roleId: number; // ✅ NUOVO: FK verso roles
   isActive: boolean;
   isVerified: boolean;
-  // ❌ RIMOSSO: profile?: ProfileType;
-  // ❌ RIMOSSO: level?: number;
   lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -92,8 +87,6 @@ export interface RegisterRequest {
   accountType: AccountType;
   entityId: string;
   roleId: number; // ✅ NUOVO: ruolo da assegnare
-  // ❌ RIMOSSO: profile?: ProfileType;
-  // ❌ RIMOSSO: level?: number;
 }
 
 export interface LoginRequest {
@@ -102,19 +95,19 @@ export interface LoginRequest {
   accountType: AccountType;
 }
 
+export interface LoginResponseAccount {
+  id: number;
+  email: string;
+  accountType: AccountType;
+  roleId: number;
+  permissions: string[]; // ✅ AGGIUNTO: Array di permessi dell'utente
+  roleName?: string; // ✅ AGGIUNTO: Nome del ruolo per UI/debug
+}
+
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
-  account: {
-    id: number; // ✅ AGGIORNATO: number
-    email: string;
-    accountType: AccountType;
-    roleId: number; // ✅ NUOVO
-    // ❌ RIMOSSO: profile?: ProfileType;
-    // ❌ RIMOSSO: level?: number;
-    // Opzionale: includere permissions per debug/UI
-    // permissions?: string[];
-  };
+  account: LoginResponseAccount;
 }
 
 export interface RefreshTokenRequest {
@@ -142,8 +135,6 @@ export interface AuthTokenPayload {
   roleId: number; // ✅ NUOVO
   permissions: string[]; // ✅ NUOVO: array di permessi ['spedizioni.*', 'report.read', ...]
   sessionId?: number; // ✅ AGGIORNATO: number
-  // ❌ RIMOSSO: profile?: ProfileType;
-  // ❌ RIMOSSO: level?: number;
 
   // JWT standard fields (aggiunti automaticamente da jsonwebtoken)
   iat?: number; // issued at
